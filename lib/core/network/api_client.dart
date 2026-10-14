@@ -22,7 +22,11 @@ class ApiClient {
 
   ApiClient(this._storageService) : _baseUrl = '' {
     final savedUrl = _storageService.getBaseUrl();
-    if (savedUrl != null && (savedUrl.contains('127.0.0.1') || savedUrl.contains('192.168.1.50')) && Platform.isAndroid) {
+    if (savedUrl != null &&
+        (savedUrl.contains('127.0.0.1') ||
+         savedUrl.contains('192.168.1.50') ||
+         savedUrl.contains('192.168.1.59')) &&
+        Platform.isAndroid) {
       _baseUrl = ApiEndpoints.defaultBaseUrl;
       _storageService.saveBaseUrl(_baseUrl);
     } else {
@@ -74,13 +78,13 @@ class ApiClient {
 
   Future<dynamic> _executeWithFallback(Future<dynamic> Function(String currentBaseUrl) requestFn) async {
     final urlsToTry = <String>[
-      _baseUrl,
-      'http://127.0.0.1:5000/api',
-      'http://192.168.1.59:5000/api',
-      'http://10.0.2.2:5000/api',
+      if (_baseUrl.isNotEmpty) _baseUrl,
+      'http://192.168.1.68:5000/api',
       ApiEndpoints.defaultBaseUrl,
+      if (Platform.isAndroid) 'http://10.0.2.2:5000/api',
+      'http://127.0.0.1:5000/api',
       'http://localhost:5000/api',
-    ].toSet().toList();
+    ].where((url) => url.isNotEmpty).toSet().toList();
 
     dynamic lastException;
     for (int i = 0; i < urlsToTry.length; i++) {
@@ -136,13 +140,21 @@ class ApiClient {
     });
   }
 
-  Future<dynamic> uploadFile(String endpoint, String filePath, String fileFieldName) async {
+  Future<dynamic> uploadFile(
+    String endpoint,
+    String filePath,
+    String fileFieldName, {
+    Map<String, String>? fields,
+  }) async {
     return _executeWithFallback((currentBaseUrl) async {
       final url = Uri.parse('$currentBaseUrl$endpoint');
-      _logRequest('POST (UPLOAD)', url, body: {'file': filePath});
+      _logRequest('POST (UPLOAD)', url, body: {'file': filePath, ...?fields});
       try {
         final request = http.MultipartRequest('POST', url);
         request.headers.addAll(_getHeaders(isMultipart: true));
+        if (fields != null) {
+          request.fields.addAll(fields);
+        }
 
         final file = await http.MultipartFile.fromPath(fileFieldName, filePath);
         request.files.add(file);

@@ -6,7 +6,7 @@ class ApiEndpoints {
   // For iOS / Desktop / Web / Real Device on local network: 127.0.0.1:5000 or custom IP
   static String get defaultBaseUrl {
     if (Platform.isAndroid) {
-      return 'http://192.168.1.59:5000/api';
+      return 'http://10.0.2.2:5000/api';
     } else {
       return 'http://localhost:5000/api';
     }

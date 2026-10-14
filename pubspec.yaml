@@ -39,6 +39,9 @@ dependencies:
   audioplayers: ^6.0.0
   whisper_ggml: ^2.7.1
   ffmpeg_kit_flutter_new_min: ^2.1.0
+  path_provider: ^2.1.6
+  readora_audio_stt:
+    path: packages/readora_audio_stt
 
 dependency_overrides:
   flutter_plugin_android_lifecycle: 2.0.20
@@ -53,6 +56,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  path_provider_platform_interface: ^2.1.2
+  plugin_platform_interface: ^2.1.8
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -66,9 +71,8 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  assets:
+    - assets/images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

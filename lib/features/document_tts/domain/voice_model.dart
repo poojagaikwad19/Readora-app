@@ -29,12 +29,6 @@ class VoiceModel {
   static List<VoiceModel> defaultVoices() {
     return [
       VoiceModel(
-        voiceId: 'default',
-        name: 'Default Natural Voice (Edge TTS)',
-        category: 'Standard',
-        description: 'Fast, clear neural speech synthesis',
-      ),
-      VoiceModel(
         voiceId: 'CwhRBWXzGAHq8TQ4Fs17',
         name: 'Roger (Laid-back & Natural)',
         category: 'Neural AI',

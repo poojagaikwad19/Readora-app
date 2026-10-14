@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:audioplayers/audioplayers.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
 import '../../../common_widgets/app_button.dart';
 import '../../../common_widgets/language_selector.dart';
 import '../../../common_widgets/pdf_card.dart';
-import '../../../common_widgets/stat_card.dart';
 import '../providers/document_tts_provider.dart';
+import '../widgets/readora_audio_player.dart';
+import '../widgets/readora_voice_selector.dart';
+import '../widgets/workspace_overview_carousel.dart';
 import '../../domain/voice_model.dart';
-import 'audio_player_screen.dart';
+import 'history_screen.dart';
 import 'pdf_reader_screen.dart';
 import 'pdf_upload_screen.dart';
+import '../../../downloads/presentation/screens/downloads_screen.dart';
+import '../../../downloads/presentation/providers/downloads_provider.dart';
+import '../../../settings/presentation/screens/settings_screen.dart';
+import '../../../settings/presentation/providers/settings_provider.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -23,9 +28,96 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   int _currentIndex = 0;
-  bool _isQuickStartExpanded = false;
+  bool _isLoggingOut = false;
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _serverUrlController = TextEditingController();
+
+  Future<void> _confirmAndLogout() async {
+    if (_isLoggingOut) return;
+
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.logout_rounded, color: AppColors.primary),
+              const SizedBox(width: 10),
+              Text(
+                'Logout',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: dialogContext.textPrimaryColor),
+              ),
+            ],
+          ),
+          content: Text(
+            'Are you sure you want to logout?',
+            style: TextStyle(fontSize: 14, color: dialogContext.textPrimaryColor),
+          ),
+          actionsPadding: const EdgeInsets.only(right: 16, bottom: 16, top: 4),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textSecondary,
+              ),
+              child: const Text('No', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              ),
+              child: const Text('Yes', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout != true) return;
+    if (_isLoggingOut) return;
+
+    setState(() {
+      _isLoggingOut = true;
+    });
+
+    try {
+      // On confirmed logout, stop active audio and prevent stale callbacks from restarting it
+      await ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
+      await ref.read(documentTtsNotifierProvider.notifier).stopOriginalAudio();
+      await ref.read(downloadsProvider.notifier).stopPlayback();
+
+      await ref.read(authNotifierProvider.notifier).logout();
+      ref.read(settingsProvider.notifier).reloadSettingsForUser('guest');
+      ref.read(downloadsProvider.notifier).loadDownloads('guest');
+      if (!mounted) return;
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Logout failed: ${e.toString()}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoggingOut = false;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -176,15 +268,27 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final user = authState.user;
     final stats = _calculateStats(ttsState.userDocuments);
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
+    final isDark = context.isDark;
+
+    return PopScope(
+      canPop: _currentIndex == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_currentIndex != 0) {
+          setState(() {
+            _currentIndex = 0;
+          });
+        }
+      },
+      child: Scaffold(
+        backgroundColor: context.scaffoldBg,
       drawer: _buildSidebarDrawer(user, stats),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: context.surfaceBg,
         elevation: 0,
         leading: Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.menu_rounded, color: AppColors.textPrimary),
+            icon: Icon(Icons.menu_rounded, color: context.textPrimaryColor),
             tooltip: 'Navigation Menu',
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
@@ -194,44 +298,63 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: AppColors.accentPill,
+                color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.record_voice_over_rounded, color: AppColors.primary, size: 20),
+              child: Icon(Icons.record_voice_over_rounded, color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary, size: 20),
             ),
             const SizedBox(width: 10),
-            const Text(
+            Text(
               'Readora',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 19,
-                color: AppColors.textPrimary,
+                color: context.textPrimaryColor,
                 letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'TTS',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
               ),
             ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: AppColors.textPrimary),
-            tooltip: 'Server Settings',
-            onPressed: _showServerSettingsDialog,
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: Center(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _currentIndex = 1; // Navigate to Profile tab
+                  });
+                },
+                child: Builder(
+                  builder: (context) {
+                    final initials = _getUserInitials(user?.name);
+                    return Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: initials.isNotEmpty
+                          ? Text(
+                              initials,
+                              style: TextStyle(
+                                color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            )
+                          : Icon(
+                              Icons.person_rounded,
+                              color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
+                              size: 20,
+                            ),
+                    );
+                  },
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -241,22 +364,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           // Tab 0: Home Dashboard Overview
           _buildHomeTab(user, ttsState, stats),
 
-          // Tab 1: My Documents
-          _buildMyDocumentsTab(ttsState),
-
-          // Tab 2: Convert to Audio (TTS Studio)
-          _buildTtsStudioTab(ttsState),
-
-          // Tab 3: Profile & Settings
+          // Tab 1: Profile & Settings
           _buildProfileTab(user, ttsState, stats),
         ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.surfaceBg,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
               blurRadius: 16,
               offset: const Offset(0, -4),
             ),
@@ -270,9 +387,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             });
           },
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: AppColors.primary,
-          unselectedItemColor: AppColors.textMuted,
+          backgroundColor: context.surfaceBg,
+          selectedItemColor: isDark ? const Color(0xFFA78BFA) : AppColors.primary,
+          unselectedItemColor: context.textMutedColor,
           selectedFontSize: 11,
           unselectedFontSize: 11,
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
@@ -280,523 +397,100 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.grid_view_rounded),
-              activeIcon: Icon(Icons.grid_view_rounded, color: AppColors.primary),
+              activeIcon: Icon(Icons.grid_view_rounded),
               label: 'Home',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.folder_outlined),
-              activeIcon: Icon(Icons.folder_rounded, color: AppColors.primary),
-              label: 'My Docs',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.graphic_eq_rounded),
-              activeIcon: Icon(Icons.graphic_eq_rounded, color: AppColors.primary),
-              label: 'Convert',
-            ),
-            BottomNavigationBarItem(
               icon: Icon(Icons.person_outline_rounded),
-              activeIcon: Icon(Icons.person_rounded, color: AppColors.primary),
+              activeIcon: Icon(Icons.person_rounded),
               label: 'Profile',
             ),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
-  // QUICK START DROPDOWN COMPONENT
-  Widget _buildQuickStartDropdown() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: _isQuickStartExpanded
-              ? AppColors.primary.withOpacity(0.3)
-              : AppColors.primary.withOpacity(0.12),
-          width: _isQuickStartExpanded ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _isQuickStartExpanded
-                ? AppColors.primary.withOpacity(0.08)
-                : Colors.black.withOpacity(0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () {
-              setState(() {
-                _isQuickStartExpanded = !_isQuickStartExpanded;
-              });
-            },
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFF59E0B).withOpacity(0.35),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 16),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Select an action',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: _isQuickStartExpanded ? 0.5 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: AppColors.primary,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_isQuickStartExpanded) ...[
-            const Divider(height: 1, color: AppColors.border),
-            const SizedBox(height: 4),
-            _buildQuickMenuItem(
-              icon: Icons.record_voice_over_rounded,
-              gradientColors: const [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
-              title: 'Text to Speech',
-              subtitle: 'Convert document to speech',
-              onTap: () {
-                setState(() => _isQuickStartExpanded = false);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const PdfUploadScreen(mode: UploadMode.tts)),
-                );
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.graphic_eq_rounded,
-              gradientColors: const [Color(0xFF0D9488), Color(0xFF0F766E)],
-              title: 'Speech to Text',
-              subtitle: 'Transcribe audio to text',
-              onTap: () {
-                setState(() => _isQuickStartExpanded = false);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const PdfUploadScreen(mode: UploadMode.stt)),
-                );
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.document_scanner_rounded,
-              gradientColors: const [Color(0xFF2563EB), Color(0xFF1D4ED8)],
-              title: 'Extract Text',
-              subtitle: 'Extract text from documents',
-              onTap: () {
-                setState(() => _isQuickStartExpanded = false);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const PdfUploadScreen(mode: UploadMode.all)),
-                );
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.translate_rounded,
-              gradientColors: const [Color(0xFF6366F1), Color(0xFF4338CA)],
-              title: 'Translate',
-              subtitle: 'Translate text/documents',
-              onTap: () {
-                setState(() {
-                  _isQuickStartExpanded = false;
-                  _currentIndex = 2;
-                });
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.folder_copy_rounded,
-              gradientColors: const [Color(0xFFF59E0B), Color(0xFFD97706)],
-              title: 'My Documents',
-              subtitle: 'View uploaded documents',
-              onTap: () {
-                setState(() {
-                  _isQuickStartExpanded = false;
-                  _currentIndex = 1;
-                });
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.history_rounded,
-              gradientColors: const [Color(0xFFEC4899), Color(0xFFBE185D)],
-              title: 'History',
-              subtitle: 'View previous activities',
-              onTap: () {
-                setState(() {
-                  _isQuickStartExpanded = false;
-                  _currentIndex = 1;
-                });
-              },
-            ),
-            _buildQuickMenuItem(
-              icon: Icons.star_rounded,
-              gradientColors: const [Color(0xFFEAB308), Color(0xFFCA8A04)],
-              title: 'Favorites',
-              subtitle: 'View saved items',
-              onTap: () {
-                setState(() {
-                  _isQuickStartExpanded = false;
-                  _currentIndex = 1;
-                });
-              },
-            ),
-            const SizedBox(height: 6),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickMenuItem({
-    required IconData icon,
-    required List<Color> gradientColors,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        highlightColor: gradientColors.first.withOpacity(0.05),
-        splashColor: gradientColors.first.withOpacity(0.1),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: gradientColors,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(11),
-                  boxShadow: [
-                    BoxShadow(
-                      color: gradientColors.first.withOpacity(0.28),
-                      blurRadius: 6,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: Icon(icon, color: Colors.white, size: 19),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: AppColors.background,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  size: 11,
-                  color: AppColors.textMuted,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  // Helper to safely extract 1-2 character user initials
+  String _getUserInitials(String? name) {
+    if (name == null || name.trim().isEmpty) return '';
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) {
+      return parts.first.characters.first.toUpperCase();
+    }
+    final firstInitial = parts.first.characters.first.toUpperCase();
+    final lastInitial = parts.last.characters.first.toUpperCase();
+    return '$firstInitial$lastInitial';
   }
 
   // TAB 0: HOME DASHBOARD OVERVIEW
   Widget _buildHomeTab(dynamic user, DocumentTtsState ttsState, Map<String, String> stats) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 16.0, bottom: 28.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Welcome Banner
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [AppColors.primaryGradientStart, AppColors.primaryGradientEnd],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withOpacity(0.3),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: Colors.white.withOpacity(0.25),
-                  child: Text(
-                    user?.name.isNotEmpty == true ? user!.name[0].toUpperCase() : 'U',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 22,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Text(
-                            'READORA CLOUD',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Welcome back, ${user?.name ?? 'User'}!',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user?.email ?? 'Text-to-Speech & Document Reader',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          // 1. Workspace Overview Autoplay Carousel directly below App Bar
+          WorkspaceOverviewCarousel(
+            stats: stats,
+            isVisible: _currentIndex == 0,
           ),
-          const SizedBox(height: 20),
-
-          // QUICK START DROPDOWN
-          _buildQuickStartDropdown(),
-
           const SizedBox(height: 24),
 
-          // TWO MAIN FEATURE OPTIONS (Requirement 1)
-          const Text(
+          // 2. Choose Feature: Polished TTS & STT Grid
+          Text(
             'Choose Feature',
             style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
+              fontSize: 16.5,
+              fontWeight: FontWeight.w700,
+              color: context.textPrimaryColor,
+              letterSpacing: -0.3,
             ),
           ),
           const SizedBox(height: 12),
 
-          Row(
-            children: [
-              // Option 1: Text to Speech
-              Expanded(
-                child: _buildMainFeatureCard(
-                  title: 'Text to Speech',
-                  subtitle: 'Convert document & text to natural audio speech',
-                  actionText: 'Upload File',
-                  icon: Icons.record_voice_over_rounded,
-                  primaryColor: AppColors.primary,
-                  backgroundColor: AppColors.accentPill,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const PdfUploadScreen(mode: UploadMode.tts),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 14),
-
-              // Option 2: Speech to Text
-              Expanded(
-                child: _buildMainFeatureCard(
-                  title: 'Speech to Text',
-                  subtitle: 'Transcribe audio recordings into written text',
-                  actionText: 'Upload Audio',
-                  icon: Icons.graphic_eq_rounded,
-                  primaryColor: const Color(0xFF0D9488),
-                  backgroundColor: const Color(0xFFCCFBF1),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const PdfUploadScreen(mode: UploadMode.stt),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+          _buildFeatureGrid(context),
           const SizedBox(height: 24),
 
-          // Statistics Header
-          const Text(
-            'Workspace Overview',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Responsive Statistic Cards Grid
-          GridView.count(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.05,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              StatCard(
-                title: 'Total Documents',
-                value: stats['totalDocs']!,
-                subtitle: 'Extracted files',
-                icon: Icons.description_rounded,
-                iconColor: const Color(0xFF4F46E5),
-                iconBackgroundColor: const Color(0xFFEEF2FF),
-              ),
-              StatCard(
-                title: 'Storage Used',
-                value: stats['storageUsed']!,
-                subtitle: 'Processed text size',
-                icon: Icons.pie_chart_rounded,
-                iconColor: const Color(0xFF8B5CF6),
-                iconBackgroundColor: const Color(0xFFF5F3FF),
-              ),
-              StatCard(
-                title: 'Total Words',
-                value: stats['totalWords']!,
-                subtitle: 'Extracted vocabulary',
-                icon: Icons.text_fields_rounded,
-                iconColor: const Color(0xFF059669),
-                iconBackgroundColor: const Color(0xFFECFDF5),
-              ),
-              StatCard(
-                title: 'Last Activity',
-                value: stats['lastUpload']!,
-                subtitle: 'Latest extraction',
-                icon: Icons.history_rounded,
-                iconColor: const Color(0xFFD97706),
-                iconBackgroundColor: const Color(0xFFFFFBEB),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // Audio Player Banner if active
-          if (ttsState.currentTtsResponse != null) ...[
-            _buildActiveAudioPlayerCard(ttsState),
-            const SizedBox(height: 24),
-          ],
-
-          // Recent Extracted Documents Section Header
+          // 3. Recent Extracted Documents Section Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Text(
+              Text(
                 'Recent Extracted Documents',
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w700,
+                  color: context.textPrimaryColor,
+                  letterSpacing: -0.3,
                 ),
               ),
               TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 onPressed: () {
-                  setState(() {
-                    _currentIndex = 1; // Go to My Documents tab
-                  });
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const HistoryScreen(),
+                    ),
+                  );
                 },
-                child: const Text('View All', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                child: const Text(
+                  'View All',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppColors.primary,
+                    letterSpacing: -0.2,
+                  ),
+                ),
               ),
             ],
           ),
@@ -826,21 +520,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onPlaySpeech: () {
                     ref.read(documentTtsNotifierProvider.notifier).setActiveDocument(doc);
                     _textController.text = doc.text;
-                    setState(() {
-                      _currentIndex = 2; // Jump to TTS tab
-                    });
                     _handleGenerateSpeech();
                   },
                 );
               },
             ),
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  // TAB 1: RECENT HISTORY & UPLOADED FILES TAB
-  Widget _buildMyDocumentsTab(DocumentTtsState ttsState) {
+  // RECENT HISTORY & UPLOADED FILES COMPONENT
+  Widget buildMyDocumentsTab(DocumentTtsState ttsState) {
     final docs = ttsState.userDocuments;
 
     return Padding(
@@ -900,9 +592,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         onPlaySpeech: () {
                           ref.read(documentTtsNotifierProvider.notifier).setActiveDocument(doc);
                           _textController.text = doc.text;
-                          setState(() {
-                            _currentIndex = 2; // Jump to TTS Studio
-                          });
                           _handleGenerateSpeech();
                         },
                       );
@@ -914,8 +603,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // TAB 2: TEXT TO SPEECH STUDIO TAB
-  Widget _buildTtsStudioTab(DocumentTtsState ttsState) {
+  // TEXT TO SPEECH STUDIO COMPONENT
+  Widget buildTtsStudioTab(DocumentTtsState ttsState) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
@@ -1036,7 +725,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           LanguageSelector(
                             selectedLanguage: ttsState.selectedLanguage,
                             onChanged: (lang) {
-                              ref.read(documentTtsNotifierProvider.notifier).setSelectedLanguage(lang);
+                              final settings = ref.read(settingsProvider);
+                              final defVoice = settings.defaultVoiceForLanguage(lang);
+                              ref.read(documentTtsNotifierProvider.notifier).setSelectedLanguage(lang, voiceId: defVoice);
                             },
                           ),
                         ],
@@ -1064,39 +755,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               }
                               final uniqueVoices = uniqueVoicesMap.values.toList();
 
+                              final settings = ref.read(settingsProvider);
+                              final defaultForLang = settings.defaultVoiceForLanguage(ttsState.selectedLanguage);
                               final selectedVoiceValue = uniqueVoices.any((v) => v.voiceId == ttsState.selectedVoiceId)
                                   ? ttsState.selectedVoiceId
-                                  : uniqueVoices.first.voiceId;
+                                  : (uniqueVoices.any((v) => v.voiceId == defaultForLang)
+                                      ? defaultForLang
+                                      : (uniqueVoices.isNotEmpty ? uniqueVoices.first.voiceId : 'CwhRBWXzGAHq8TQ4Fs17'));
 
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.border),
-                                ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<String>(
-                                    value: selectedVoiceValue,
-                                    isExpanded: true,
-                                    onChanged: (val) {
-                                      if (val != null) {
-                                        ref.read(documentTtsNotifierProvider.notifier).setSelectedVoice(val);
-                                      }
-                                    },
-                                    items: uniqueVoices.map((voice) {
-                                      return DropdownMenuItem<String>(
-                                        value: voice.voiceId,
-                                        child: Text(
-                                          voice.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
-                                ),
+                              if (!uniqueVoices.any((v) => v.voiceId == ttsState.selectedVoiceId) && uniqueVoices.isNotEmpty) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  ref.read(documentTtsNotifierProvider.notifier).setSelectedVoice(selectedVoiceValue);
+                                });
+                              }
+
+                              return ReadoraVoiceSelector(
+                                voices: uniqueVoices,
+                                selectedVoiceId: selectedVoiceValue,
+                                onVoiceSelected: (voiceId) {
+                                  ref.read(documentTtsNotifierProvider.notifier).setSelectedVoice(voiceId);
+                                },
                               );
                             },
                           ),
@@ -1117,7 +795,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 // Inline Player directly below Generate & Speak Text
                 if (ttsState.currentTtsResponse != null) ...[
                   const SizedBox(height: 20),
-                  _buildActiveAudioPlayerCard(ttsState),
+                  const ReadoraAudioPlayer(),
                 ],
               ],
             ),
@@ -1129,6 +807,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   // TAB 3: PROFILE & SETTINGS TAB
   Widget _buildProfileTab(dynamic user, DocumentTtsState ttsState, Map<String, String> stats) {
+    final isDark = context.isDark;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
@@ -1138,12 +817,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.cardBg,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: context.borderColor),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
+                  color: Colors.black.withOpacity(isDark ? 0.2 : 0.03),
                   blurRadius: 16,
                   offset: const Offset(0, 6),
                 ),
@@ -1162,12 +841,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 const SizedBox(height: 14),
                 Text(
                   user?.name ?? 'Readora User',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: context.textPrimaryColor),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   user?.email ?? 'user@readora.app',
-                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                  style: TextStyle(fontSize: 13, color: context.textSecondaryColor),
                 ),
                 const SizedBox(height: 12),
                 Container(
@@ -1195,14 +874,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
           // Logout Action
           ElevatedButton.icon(
-            onPressed: () async {
-              await ref.read(authNotifierProvider.notifier).logout();
-              if (!mounted) return;
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
-              );
-            },
+            onPressed: _confirmAndLogout,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.error.withOpacity(0.1),
               foregroundColor: AppColors.error,
@@ -1218,227 +890,100 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return '$minutes:$seconds';
-  }
 
-  // Active Embedded Audio Player Widget Card
-  Widget _buildActiveAudioPlayerCard(DocumentTtsState ttsState) {
-    final response = ttsState.currentTtsResponse;
-    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
+  // Empty Documents Card Fallback
+  Widget _buildEmptyDocumentsCard() {
+    final isDark = context.isDark;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: AppColors.background,
+        color: context.cardBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+        border: Border.all(color: context.borderColor),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primaryGradientStart, AppColors.primaryGradientEnd],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.graphic_eq_rounded, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      response?.filename ?? 'Generated Speech',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Language: ${ttsState.selectedLanguage.toUpperCase()}',
-                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '${ttsState.playbackRate}x Speed',
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primary),
-                ),
-              ),
-            ],
+          Icon(Icons.folder_open_rounded, size: 52, color: isDark ? Colors.white24 : Colors.grey.shade300),
+          const SizedBox(height: 14),
+          Text(
+            'No history items yet',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: context.textSecondaryColor),
           ),
-          const SizedBox(height: 12),
-
-          // Progress Slider
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: AppColors.primary,
-              inactiveTrackColor: AppColors.border,
-              thumbColor: AppColors.primary,
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-            ),
-            child: Slider(
-              value: ttsState.audioPosition.inSeconds.toDouble().clamp(
-                    0.0,
-                    (ttsState.audioDuration.inSeconds > 0 ? ttsState.audioDuration.inSeconds : 1.0).toDouble(),
-                  ),
-              max: (ttsState.audioDuration.inSeconds > 0 ? ttsState.audioDuration.inSeconds : 1.0).toDouble(),
-              onChanged: (val) {
-                ref.read(documentTtsNotifierProvider.notifier).seekAudio(Duration(seconds: val.toInt()));
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(_formatDuration(ttsState.audioPosition), style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
-                Text(_formatDuration(ttsState.audioDuration), style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // Player Controls (Replay -10s, Play/Pause, Forward +10s)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                iconSize: 26,
-                icon: const Icon(Icons.replay_10_rounded, color: AppColors.textPrimary),
-                onPressed: () {
-                  final newPos = ttsState.audioPosition - const Duration(seconds: 10);
-                  ref.read(documentTtsNotifierProvider.notifier).seekAudio(
-                        newPos < Duration.zero ? Duration.zero : newPos,
-                      );
-                },
-              ),
-              const SizedBox(width: 12),
-              Container(
-                width: 46,
-                height: 46,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.primary,
-                ),
-                child: IconButton(
-                  iconSize: 26,
-                  icon: Icon(
-                    ttsState.playerState == PlayerState.playing
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: () {
-                    if (ttsState.playerState == PlayerState.playing) {
-                      ref.read(documentTtsNotifierProvider.notifier).pauseAudio();
-                    } else {
-                      ref.read(documentTtsNotifierProvider.notifier).resumeAudio();
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              IconButton(
-                iconSize: 26,
-                icon: const Icon(Icons.forward_10_rounded, color: AppColors.textPrimary),
-                onPressed: () {
-                  final newPos = ttsState.audioPosition + const Duration(seconds: 10);
-                  ref.read(documentTtsNotifierProvider.notifier).seekAudio(newPos);
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Playback Speed Selector Chips
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text(
-                'Speed: ',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted),
-              ),
-              const SizedBox(width: 4),
-              Wrap(
-                spacing: 4,
-                children: speeds.map((speed) {
-                  final isSelected = ttsState.playbackRate == speed;
-                  return InkWell(
-                    onTap: () {
-                      ref.read(documentTtsNotifierProvider.notifier).setPlaybackRate(speed);
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: isSelected ? AppColors.primary : Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: isSelected ? AppColors.primary : AppColors.border),
-                      ),
-                      child: Text(
-                        '${speed}x',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: isSelected ? Colors.white : AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
+          const SizedBox(height: 6),
+          Text(
+            'Uploaded documents and audio files for TTS and STT will appear here and automatically stay for 30 days.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: context.textMutedColor),
           ),
         ],
       ),
     );
   }
 
-  // Empty Documents Card Fallback
-  Widget _buildEmptyDocumentsCard() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.folder_open_rounded, size: 52, color: Colors.grey.shade300),
-          const SizedBox(height: 14),
-          const Text(
-            'No history items yet',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textSecondary),
+  // Polished Responsive Grid for TTS and STT Feature Cards
+  Widget _buildFeatureGrid(BuildContext context) {
+    final isDark = context.isDark;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 320;
+
+        final ttsCard = _buildMainFeatureCard(
+          title: 'Text to Speech',
+          subtitle: 'Turn documents or text into speech.',
+          actionText: 'Upload File',
+          icon: Icons.record_voice_over_rounded,
+          primaryColor: isDark ? const Color(0xFFA78BFA) : AppColors.primary,
+          backgroundColor: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const PdfUploadScreen(mode: UploadMode.tts),
+              ),
+            );
+          },
+        );
+
+        final sttCard = _buildMainFeatureCard(
+          title: 'Speech to Text',
+          subtitle: 'Transcribe an audio file into text.',
+          actionText: 'Upload Audio',
+          icon: Icons.graphic_eq_rounded,
+          primaryColor: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488),
+          backgroundColor: isDark ? const Color(0xFF133E3B) : const Color(0xFFCCFBF1),
+          onTap: () {
+            ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const PdfUploadScreen(mode: UploadMode.stt),
+              ),
+            );
+          },
+        );
+
+        if (isNarrow) {
+          return Column(
+            children: [
+              ttsCard,
+              const SizedBox(height: 14),
+              sttCard,
+            ],
+          );
+        }
+
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: ttsCard),
+              const SizedBox(width: 14),
+              Expanded(child: sttCard),
+            ],
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Uploaded documents and audio files for TTS and STT will appear here and automatically stay for 30 days.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1452,83 +997,99 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required Color backgroundColor,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: backgroundColor,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(icon, color: primaryColor, size: 24),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppColors.textSecondary,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-              decoration: BoxDecoration(
-                color: primaryColor,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      actionText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+    final isDark = context.isDark;
+    return Container(
+      decoration: BoxDecoration(
+        color: context.cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: context.borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.025),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: backgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(icon, color: primaryColor, size: 22),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: context.textPrimaryColor,
+                        letterSpacing: -0.2,
                       ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: context.textSecondaryColor,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: primaryColor,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14),
-                ],
-              ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          actionText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            letterSpacing: -0.1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 14),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -1540,21 +1101,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
+    final isDark = context.isDark;
+    final primaryColor = isDark ? const Color(0xFFA78BFA) : AppColors.primary;
+    final textColor = isSelected ? primaryColor : context.textPrimaryColor;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         selected: isSelected,
-        selectedTileColor: AppColors.primary.withOpacity(0.1),
+        selectedTileColor: primaryColor.withOpacity(isDark ? 0.2 : 0.1),
         leading: Icon(
           icon,
-          color: isSelected ? AppColors.primary : AppColors.textPrimary,
+          color: textColor,
           size: 20,
         ),
         title: Text(
           title,
           style: TextStyle(
-            color: isSelected ? AppColors.primary : AppColors.textPrimary,
+            color: textColor,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
             fontSize: 13,
           ),
@@ -1567,7 +1132,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   // Helper Widget for Sidebar Navigation Drawer
   Widget _buildSidebarDrawer(dynamic user, Map<String, String> stats) {
     return Drawer(
-      backgroundColor: Colors.white,
+      backgroundColor: context.surfaceBg,
       child: SafeArea(
         child: Column(
           children: [
@@ -1598,7 +1163,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Readora AI',
+                          'Readora',
                           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                         const SizedBox(height: 2),
@@ -1653,6 +1218,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     isSelected: false,
                     onTap: () {
                       Navigator.pop(context);
+                      ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -1662,35 +1228,46 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     },
                   ),
                   _buildDrawerTile(
-                    icon: Icons.folder_outlined,
-                    title: 'Documents',
-                    isSelected: _currentIndex == 1,
-                    onTap: () {
-                      Navigator.pop(context);
-                      setState(() {
-                        _currentIndex = 1;
-                      });
-                    },
-                  ),
-                  _buildDrawerTile(
                     icon: Icons.history_rounded,
                     title: 'History',
                     isSelected: false,
                     onTap: () {
                       Navigator.pop(context);
-                      setState(() {
-                        _currentIndex = 1;
-                      });
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const HistoryScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _buildDrawerTile(
+                    icon: Icons.file_download_outlined,
+                    title: 'Downloads',
+                    isSelected: false,
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const DownloadsScreen(),
+                        ),
+                      );
                     },
                   ),
                   const Divider(height: 24),
                   _buildDrawerTile(
                     icon: Icons.settings_outlined,
                     title: 'Settings',
-                    isSelected: _currentIndex == 3,
+                    isSelected: false,
                     onTap: () {
                       Navigator.pop(context);
-                      _showServerSettingsDialog();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SettingsScreen(),
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -1705,14 +1282,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 tileColor: AppColors.error.withOpacity(0.08),
                 leading: const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
                 title: const Text('Logout', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.bold, fontSize: 13)),
-                onTap: () async {
+                onTap: () {
                   Navigator.pop(context);
-                  await ref.read(authNotifierProvider.notifier).logout();
-                  if (!mounted) return;
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => const LoginScreen()),
-                  );
+                  _confirmAndLogout();
                 },
               ),
             ),

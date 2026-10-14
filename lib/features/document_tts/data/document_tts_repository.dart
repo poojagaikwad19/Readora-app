@@ -35,12 +35,25 @@ class DocumentTtsRepository {
     String language = 'english',
     String? voiceId,
     String? documentId,
+    int? chunkIndex,
+    int? totalChunks,
+    String? sessionId,
+    String? textHash,
+    List<dynamic>? corrections,
   }) async {
     final response = await _apiClient.post(ApiEndpoints.textToSpeech, {
       'text': text,
       'language': language,
       if (voiceId != null && voiceId.isNotEmpty) 'voiceId': voiceId,
-      if (documentId != null && documentId.isNotEmpty) 'documentId': documentId,
+      if (documentId != null && documentId.isNotEmpty) ...{
+        'docId': documentId,
+        'documentId': documentId,
+      },
+      if (chunkIndex != null) 'chunkIndex': chunkIndex,
+      if (totalChunks != null) 'totalChunks': totalChunks,
+      if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+      if (textHash != null && textHash.isNotEmpty) 'textHash': textHash,
+      if (corrections != null && corrections.isNotEmpty) 'corrections': corrections,
     });
     return TtsResponseModel.fromJson(response);
   }
@@ -67,16 +80,23 @@ class DocumentTtsRepository {
     return response['translatedText'] ?? text;
   }
 
-  /// Transcribe audio file via Readora backend API (used for English)
-  Future<String> transcribeAudioBackend(String filePath, {String? language}) async {
+  /// Transcribe audio file via Readora backend API returning full response with word timings
+  Future<Map<String, dynamic>> transcribeAudioBackendDetailed(String filePath, {String? language}) async {
     final response = await _apiClient.uploadFile(
       ApiEndpoints.speechToText,
       filePath,
       'file',
+      fields: (language != null && language.isNotEmpty) ? {'language': language} : null,
     );
     if (response is Map && response.containsKey('transcript')) {
-      return response['transcript'] ?? '';
+      return Map<String, dynamic>.from(response);
     }
     throw ApiException(response['message'] ?? 'Backend audio transcription failed');
+  }
+
+  /// Transcribe audio file via Readora backend API (used for English)
+  Future<String> transcribeAudioBackend(String filePath, {String? language}) async {
+    final res = await transcribeAudioBackendDetailed(filePath, language: language);
+    return res['transcript']?.toString() ?? '';
   }
 }

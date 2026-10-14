@@ -1,8 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
   group('Flutter Backend & Google Cloud STT Language Routing Unit Tests', () {
     test('Verify Language Codes Routing Mapping for Google Cloud STT', () {
       String getLanguageCode(String selectedLang) {

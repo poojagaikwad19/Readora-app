@@ -93,9 +93,10 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authNotifierProvider);
     final isLoading = authState.status == AuthStatus.loading;
+    final isDark = context.isDark;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.scaffoldBg,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -104,11 +105,12 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
               constraints: const BoxConstraints(maxWidth: 440),
               padding: const EdgeInsets.all(28.0),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: context.cardBg,
                 borderRadius: BorderRadius.circular(24.0),
+                border: Border.all(color: context.borderColor),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    color: Colors.black.withOpacity(isDark ? 0.25 : 0.04),
                     blurRadius: 24,
                     offset: const Offset(0, 8),
                   ),
@@ -122,13 +124,13 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.accentPill,
+                        color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
+                      child: Text(
                         'READORA CLOUD',
                         style: TextStyle(
-                          color: AppColors.primary,
+                          color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.8,
@@ -142,33 +144,33 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: AppColors.accentPill,
+                        color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.person_add_outlined,
-                        color: AppColors.primary,
+                        color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                         size: 26,
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text(
+                  Text(
                     'Create Account',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
+                      color: context.textPrimaryColor,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'Get started with your free Readora workspace',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.textSecondary,
+                      color: context.textSecondaryColor,
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -237,11 +239,11 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         'Already have an account? ',
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: AppColors.textSecondary,
+                          color: context.textSecondaryColor,
                         ),
                       ),
                       GestureDetector(
@@ -251,12 +253,12 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
                             MaterialPageRoute(builder: (context) => const LoginScreen()),
                           );
                         },
-                        child: const Text(
+                        child: Text(
                           'Sign In',
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
+                            color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                           ),
                         ),
                       ),

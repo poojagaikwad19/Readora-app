@@ -43,7 +43,7 @@ class _LogoSplashScreenState extends ConsumerState<LogoSplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.scaffoldBg,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -71,21 +71,21 @@ class _LogoSplashScreenState extends ConsumerState<LogoSplashScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
+            Text(
               'Readora',
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.w900,
-                color: AppColors.textPrimary,
+                color: context.textPrimaryColor,
                 letterSpacing: 1.2,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'AI Text-to-Speech & Document OCR',
               style: TextStyle(
                 fontSize: 14,
-                color: AppColors.textSecondary,
+                color: context.textSecondaryColor,
                 fontWeight: FontWeight.w500,
               ),
             ),

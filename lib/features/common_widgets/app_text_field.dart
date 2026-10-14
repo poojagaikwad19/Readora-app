@@ -31,10 +31,10 @@ class AppTextField extends StatelessWidget {
         if (label != null) ...[
           Text(
             label!,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
+              color: context.textPrimaryColor,
             ),
           ),
           const SizedBox(height: 6),
@@ -44,18 +44,18 @@ class AppTextField extends StatelessWidget {
           obscureText: obscureText,
           keyboardType: keyboardType,
           maxLines: maxLines,
-          style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+          style: TextStyle(fontSize: 14, color: context.textPrimaryColor),
           decoration: InputDecoration(
             hintText: hintText,
-            hintStyle: const TextStyle(fontSize: 13, color: AppColors.textMuted),
-            prefixIcon: Icon(prefixIcon, color: AppColors.textMuted, size: 18),
+            hintStyle: TextStyle(fontSize: 13, color: context.textMutedColor),
+            prefixIcon: Icon(prefixIcon, color: context.textMutedColor, size: 18),
             suffixIcon: suffixIcon,
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: context.cardBg,
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
+              borderSide: BorderSide(color: context.borderColor),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),

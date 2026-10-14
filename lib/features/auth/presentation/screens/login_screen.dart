@@ -4,6 +4,8 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../common_widgets/app_button.dart';
 import '../../../common_widgets/app_text_field.dart';
 import '../../../document_tts/presentation/screens/dashboard_screen.dart';
+import '../../../downloads/presentation/providers/downloads_provider.dart';
+import '../../../settings/presentation/providers/settings_provider.dart';
 import '../providers/auth_provider.dart';
 import 'registration_screen.dart';
 
@@ -47,6 +49,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final authState = ref.read(authNotifierProvider);
 
     if (success) {
+      final user = authState.user;
+      if (user != null) {
+        ref.read(settingsProvider.notifier).reloadSettingsForUser(user.id);
+        ref.read(downloadsProvider.notifier).loadDownloads(user.id);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(authState.successMessage ?? 'Login successful!'),
@@ -71,9 +78,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authNotifierProvider);
     final isLoading = authState.status == AuthStatus.loading;
+    final isDark = context.isDark;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.scaffoldBg,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -82,11 +90,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               constraints: const BoxConstraints(maxWidth: 440),
               padding: const EdgeInsets.all(28.0),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: context.cardBg,
                 borderRadius: BorderRadius.circular(24.0),
+                border: Border.all(color: context.borderColor),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    color: Colors.black.withOpacity(isDark ? 0.25 : 0.04),
                     blurRadius: 24,
                     offset: const Offset(0, 8),
                   ),
@@ -100,13 +109,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.accentPill,
+                        color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
+                      child: Text(
                         'READORA CLOUD',
                         style: TextStyle(
-                          color: AppColors.primary,
+                          color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.8,
@@ -120,33 +129,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: AppColors.accentPill,
+                        color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.login_rounded,
-                        color: AppColors.primary,
+                        color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                         size: 26,
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text(
+                  Text(
                     'Welcome Back',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
+                      color: context.textPrimaryColor,
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'Sign in to access your Readora files and workspace',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.textSecondary,
+                      color: context.textSecondaryColor,
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -188,11 +197,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
+                      Text(
                         "Don't have an account? ",
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: AppColors.textSecondary,
+                          color: context.textSecondaryColor,
                         ),
                       ),
                       GestureDetector(
@@ -202,12 +211,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             MaterialPageRoute(builder: (context) => const RegistrationScreen()),
                           );
                         },
-                        child: const Text(
+                        child: Text(
                           'Create Account',
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.bold,
-                            color: AppColors.primary,
+                            color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
                           ),
                         ),
                       ),

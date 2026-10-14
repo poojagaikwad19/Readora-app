@@ -1,3 +1,5 @@
+import 'timed_word_model.dart';
+
 class DocumentModel {
   final String docId;
   final String filename;
@@ -11,6 +13,10 @@ class DocumentModel {
   final List<dynamic> pages;
   final int pageCount;
   final DateTime? createdAt;
+  final String? contentHash;
+  final List<dynamic> chunks;
+  final List<TimedWord> timedWords;
+  final String? audioSourcePath;
 
   DocumentModel({
     required this.docId,
@@ -25,6 +31,10 @@ class DocumentModel {
     this.pages = const [],
     this.pageCount = 1,
     this.createdAt,
+    this.contentHash,
+    this.chunks = const [],
+    this.timedWords = const [],
+    this.audioSourcePath,
   });
 
   factory DocumentModel.fromJson(Map<String, dynamic> json) {
@@ -33,6 +43,14 @@ class DocumentModel {
     final computedPageCount = numPagesVal != null
         ? (int.tryParse(numPagesVal.toString()) ?? 1)
         : (pagesList.isNotEmpty ? pagesList.length : 1);
+
+    final rawWords = json['timedWords'] ?? json['words'];
+    final parsedTimedWords = (rawWords is List)
+        ? rawWords
+            .where((e) => e is Map)
+            .map((e) => TimedWord.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : const <TimedWord>[];
 
     return DocumentModel(
       docId: json['docId'] ?? json['id'] ?? json['_id'] ?? '',
@@ -49,6 +67,10 @@ class DocumentModel {
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString())
           : null,
+      contentHash: json['contentHash'] ?? json['textHash'],
+      chunks: json['chunks'] is List ? (json['chunks'] as List) : const [],
+      timedWords: parsedTimedWords,
+      audioSourcePath: json['audioSourcePath']?.toString(),
     );
   }
 
@@ -66,6 +88,11 @@ class DocumentModel {
       'pages': pages,
       'pageCount': pageCount,
       'createdAt': createdAt?.toIso8601String(),
+      'contentHash': contentHash,
+      'chunks': chunks,
+      'timedWords': timedWords.map((w) => w.toJson()).toList(),
+      if (audioSourcePath != null) 'audioSourcePath': audioSourcePath,
     };
   }
 }
+

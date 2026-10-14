@@ -7,6 +7,10 @@ class TtsResponseModel {
   final int size;
   final String? translatedText;
   final bool cached;
+  final int? chunkIndex;
+  final int? totalChunks;
+  final String? completeAudioUrl;
+  final String? completeFilename;
 
   TtsResponseModel({
     required this.success,
@@ -17,6 +21,10 @@ class TtsResponseModel {
     this.size = 0,
     this.translatedText,
     this.cached = false,
+    this.chunkIndex,
+    this.totalChunks,
+    this.completeAudioUrl,
+    this.completeFilename,
   });
 
   factory TtsResponseModel.fromJson(Map<String, dynamic> json) {
@@ -29,6 +37,10 @@ class TtsResponseModel {
       size: json['size'] ?? json['completeSize'] ?? 0,
       translatedText: json['translatedText'],
       cached: json['cached'] ?? false,
+      chunkIndex: json['chunkIndex'] != null ? int.tryParse(json['chunkIndex'].toString()) : null,
+      totalChunks: json['totalChunks'] != null ? int.tryParse(json['totalChunks'].toString()) : null,
+      completeAudioUrl: json['completeAudioUrl'],
+      completeFilename: json['completeFilename'],
     );
   }
 }
