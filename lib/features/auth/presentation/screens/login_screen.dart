@@ -125,17 +125,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   Center(
-                    child: Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Icon(
-                        Icons.login_rounded,
-                        color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
-                        size: 26,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.asset(
+                        'assets/images/R-logo.png',
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
                       ),
                     ),
                   ),

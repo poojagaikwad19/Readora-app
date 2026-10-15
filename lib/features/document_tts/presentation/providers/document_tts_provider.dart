@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../../core/services/storage_service.dart';
+import '../../../../core/constants/api_endpoints.dart';
 import '../../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../../../core/services/local_whisper_service.dart';
 import '../../data/document_tts_repository.dart';
@@ -17,6 +18,7 @@ import '../../../downloads/domain/download_model.dart';
 import '../../../downloads/presentation/providers/downloads_provider.dart';
 import '../../../settings/domain/settings_model.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
+import 'package:readora_audio_stt/readora_audio_stt.dart' as readora_stt hide TimedWord;
 
 // Repository Provider
 final documentTtsRepositoryProvider = Provider<DocumentTtsRepository>((ref) {
@@ -161,6 +163,8 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   String _lastBaseUrl = '';
   List<TtsResponseModel?> _progressiveAudioQueue = [];
   final Set<String> _pendingDeletions = {};
+  int _activeSttToken = 0;
+  readora_stt.AudioFileSttService? _currentSttService;
 
   DocumentTtsNotifier(this._repository, this._storageService, [this._ref]) : super(DocumentTtsState()) {
     _initAudioPlayer();
@@ -358,8 +362,27 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     );
   }
 
+  /// Cancels any active in-flight STT transcription and invalidates pending results
+  void cancelStt() {
+    _activeSttToken++;
+    try {
+      _currentSttService?.dispose();
+    } catch (_) {}
+    _currentSttService = null;
+    _invalidateActiveSession();
+    state = state.copyWith(
+      isExtracting: false,
+      errorMessage: null,
+    );
+  }
+
   /// Stops audio playback immediately, invalidates active sessions, and wipes current TTS response.
   Future<void> stopAudioAndClearQueue() async {
+    _activeSttToken++;
+    try {
+      _currentSttService?.dispose();
+    } catch (_) {}
+    _currentSttService = null;
     _invalidateActiveSession();
     await _audioPlayer.stop();
     state = state.copyWith(
@@ -711,6 +734,8 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     String filePath, {
     String? language,
   }) async {
+    final int requestToken = ++_activeSttToken;
+
     // 1. Immediately invalidate any active TTS session and stop lingering audio
     _invalidateActiveSession();
 
@@ -758,36 +783,109 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         debugPrint('Failed to copy audio to app storage: $e');
       }
 
+      if (requestToken != _activeSttToken) return null;
+
       String transcript = '';
       List<TimedWord> timedWords = [];
 
-      if (effectiveLang == 'marathi' || effectiveLang == 'mr' || effectiveLang == 'mr-in') {
-        final res = await LocalWhisperService().transcribeAudioDetailed(
-          filePath,
-          language: 'mr',
+      final sttLang = readora_stt.SttLanguage.fromCode(effectiveLang);
+
+      // Validate audio file format and size using readora_audio_stt
+      try {
+        readora_stt.AudioFormatValidator.validate(filePath);
+      } catch (valErr) {
+        debugPrint('[readora_audio_stt] File validation info: $valErr');
+      }
+
+      bool pkgSucceeded = false;
+      // 1. Attempt fast backend transcription first (completes in 1-3 seconds on host server)
+      readora_stt.AudioFileSttService? sttService;
+      try {
+        final token = await _storageService.getToken() ?? '';
+        final saved = _storageService.getBaseUrl();
+        final clientUrl = _ref?.read(apiClientProvider).baseUrl ?? '';
+
+        final rawCandidates = <String>[
+          if (clientUrl.isNotEmpty) clientUrl.replaceAll('/api', ''),
+          if (saved != null && saved.isNotEmpty) saved.replaceAll('/api', ''),
+          ...ApiEndpoints.candidateBaseUrls.map((u) => u.replaceAll('/api', '')),
+        ].map((u) => u.endsWith('/') ? u.substring(0, u.length - 1) : u).toSet().toList();
+
+        final primaryBaseUrl = rawCandidates.isNotEmpty ? rawCandidates.first : 'http://127.0.0.1:5000';
+        final otherCandidates = rawCandidates.where((u) => u != primaryBaseUrl).toList();
+
+        sttService = readora_stt.AudioFileSttService(
+          config: readora_stt.SttConfig(
+            baseUrl: primaryBaseUrl,
+            candidateBaseUrls: otherCandidates,
+            timeoutSeconds: 120,
+          ),
         );
-        transcript = res.text;
-        timedWords = res.words;
-      } else if (effectiveLang == 'hindi' || effectiveLang == 'hi' || effectiveLang == 'hi-in') {
-        final res = await LocalWhisperService().transcribeAudioDetailed(
-          filePath,
-          language: 'hi',
+        _currentSttService = sttService;
+
+        final pkgResult = await sttService.transcribeAudioFile(
+          filePath: filePath,
+          language: sttLang,
+          jwtToken: token,
         );
-        transcript = res.text;
-        timedWords = res.words;
-      } else {
-        // English / default -> route to existing Readora backend transcription
-        final res = await _repository.transcribeAudioBackendDetailed(
-          filePath,
-          language: 'en',
-        );
-        transcript = (res['transcript'] ?? res['text'] ?? '').toString();
-        if (res['words'] is List) {
-          timedWords = (res['words'] as List)
-              .map((w) => TimedWord.fromJson(Map<String, dynamic>.from(w as Map)))
-              .toList();
+
+        if (pkgResult.success && pkgResult.transcript.isNotEmpty) {
+          transcript = pkgResult.transcript;
+          timedWords = pkgResult.timedWords.map((w) => TimedWord(
+            text: w.word,
+            startMs: w.startMs,
+            endMs: w.endMs,
+          )).toList();
+          pkgSucceeded = true;
+          if (sttService.successfulBaseUrl != null) {
+            final activeApiUrl = '${sttService.successfulBaseUrl}/api';
+            _storageService.saveBaseUrl(activeApiUrl);
+            _ref?.read(apiClientProvider).updateBaseUrl(activeApiUrl);
+          }
+          debugPrint('⚡ [STT] High-speed server transcription completed: ${transcript.length} chars');
+        }
+      } catch (pkgErr) {
+        debugPrint('[readora_audio_stt] Server transcription fallback: $pkgErr');
+      } finally {
+        if (_currentSttService == sttService) {
+          _currentSttService = null;
+        }
+        sttService?.dispose();
+      }
+
+      if (requestToken != _activeSttToken) return null;
+
+      // 2. If server was unreachable, run optimized on-device Whisper (base model)
+      if (!pkgSucceeded) {
+        final langParam = sttLang == readora_stt.SttLanguage.marathi
+            ? 'mr'
+            : (sttLang == readora_stt.SttLanguage.hindi
+                ? 'hi'
+                : (sttLang == readora_stt.SttLanguage.auto ? 'auto' : 'en'));
+        debugPrint('📱 [STT] Running local optimized Whisper ($langParam)...');
+        try {
+          final res = await LocalWhisperService().transcribeAudioDetailed(
+            filePath,
+            language: langParam,
+          );
+          transcript = res.text;
+          timedWords = res.words;
+        } catch (localErr) {
+          debugPrint('📱 [STT] Local whisper fallback error: $localErr, attempting backend repo detailed...');
+          final res = await _repository.transcribeAudioBackendDetailed(
+            filePath,
+            language: langParam == 'auto' ? 'mr' : langParam,
+          );
+          transcript = (res['transcript'] ?? res['text'] ?? '').toString();
+          if (res['words'] is List) {
+            timedWords = (res['words'] as List)
+                .map((w) => TimedWord.fromJson(Map<String, dynamic>.from(w as Map)))
+                .toList();
+          }
         }
       }
+
+      if (requestToken != _activeSttToken) return null;
 
       // 3. Probe real duration from the media player without guessing
       Duration probedDuration = Duration.zero;
@@ -798,19 +896,34 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
           if (dur != null && dur > Duration.zero) {
             probedDuration = dur;
           }
+          await _audioPlayer.stop(); // Cleanly close native MediaPlayer stream/FD
         }
       } catch (e) {
         debugPrint('Could not probe audio duration: $e');
       }
 
+      if (requestToken != _activeSttToken) return null;
+
       final filename = filePath.split(RegExp(r'[/\\]')).last;
       final ext = filename.contains('.') ? filename.split('.').last.toLowerCase() : 'audio';
+
+      // Smart detected language resolution: preserve Devanagari script integrity
+      String resolvedDocLang = effectiveLang;
+      if (RegExp(r'[\u0900-\u097F]').hasMatch(transcript)) {
+        // Contains Devanagari characters -> ensure detectedLanguage is marathi or hindi, never english
+        resolvedDocLang = (effectiveLang == 'marathi' || effectiveLang == 'mr' || filename.toLowerCase().contains('marathi'))
+            ? 'marathi'
+            : 'hindi';
+      } else if (resolvedDocLang == 'auto') {
+        resolvedDocLang = 'english';
+      }
+
       final doc = DocumentModel(
         docId: 'stt_${DateTime.now().millisecondsSinceEpoch}',
         filename: filename,
         fileType: ext,
         text: transcript,
-        detectedLanguage: effectiveLang,
+        detectedLanguage: resolvedDocLang,
         wordCount: transcript.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length,
         characterCount: transcript.length,
         createdAt: DateTime.now(),
@@ -823,6 +936,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       state = state.copyWith(
         isExtracting: false,
         activeDocument: doc,
+        selectedSttLanguage: resolvedDocLang,
         originalAudioPath: persistentAudioPath,
         isPlayingOriginalAudio: false,
         clearTtsResponse: true,
@@ -833,6 +947,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       );
       return doc;
     } catch (e) {
+      if (requestToken != _activeSttToken) return null;
       state = state.copyWith(
         isExtracting: false,
         activeDocument: previousDoc,

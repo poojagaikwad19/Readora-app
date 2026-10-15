@@ -151,11 +151,11 @@ void main() {
 
       // Instructional steps
       expect(find.text('Upload'), findsOneWidget);
-      expect(find.text('Choose language'), findsOneWidget);
       expect(find.text('Transcribe'), findsOneWidget);
+      expect(find.text('Read'), findsOneWidget);
 
       // Tip
-      expect(find.text('Choose the language spoken in your recording.'), findsOneWidget);
+      expect(find.text('Clear recordings help improve transcription accuracy.'), findsOneWidget);
 
       // Verify STT illustration asset widget
       final imageFinder = find.byType(Image);
@@ -211,5 +211,80 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Choose a document'), findsOneWidget);
     });
+
+    testWidgets('Enter Text redesign renders glowing header, tall editor card, collapsible speech settings with summary, and text preservation', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(buildTestScreen(UploadMode.tts));
+      await tester.pumpAndSettle();
+
+      // Switch to Enter Text mode
+      final enterTextTab = find.text('Enter Text');
+      expect(enterTextTab, findsOneWidget);
+      await tester.tap(enterTextTab);
+      await tester.pumpAndSettle();
+
+      // 1. Glowing header
+      expect(find.text('Give your words a voice'), findsOneWidget);
+      expect(find.text('Type or paste text, then choose how it sounds.'), findsOneWidget);
+
+      // 2. Tall text editor card & live character counter
+      expect(find.text('Your text'), findsOneWidget);
+      expect(find.text('0 characters'), findsOneWidget);
+      final editorCardFinder = find.byKey(const Key('enter_text_editor_card'));
+      expect(editorCardFinder, findsOneWidget);
+      final editorHeight = tester.getSize(editorCardFinder).height;
+      // 844 * 0.42 = ~354.5px
+      expect(editorHeight, closeTo(844 * 0.42, 2.0));
+
+      final textFieldFinder = find.byType(TextField);
+      expect(textFieldFinder, findsOneWidget);
+      expect(find.byType(Scrollbar), findsOneWidget);
+
+      // 3. Speech settings collapsed by default with summary
+      expect(find.text('Speech settings'), findsOneWidget);
+      // Summary shows current language and voice (e.g. English · Roger or English · Default)
+      expect(find.textContaining('English'), findsWidgets);
+
+      // 4. Convert button present below speech settings
+      expect(find.text('Convert to Speech →'), findsOneWidget);
+
+      // 5. Enter text and verify character counter updates live
+      const testInput = 'Hello Readora TTS!';
+      await tester.enterText(textFieldFinder, testInput);
+      await tester.pumpAndSettle();
+      expect(find.text('${testInput.length} characters'), findsOneWidget);
+
+      // 6. Tap Speech settings to expand smoothly
+      await tester.tap(find.text('Speech settings'));
+      await tester.pumpAndSettle();
+
+      // Now Language and Voice dropdown rows are visible
+      expect(find.text('Language'), findsOneWidget);
+      expect(find.text('Voice'), findsOneWidget);
+
+      // Verify text was preserved
+      expect(find.text(testInput), findsOneWidget);
+
+      // 7. Tap Speech settings again to collapse
+      await tester.tap(find.text('Speech settings'));
+      await tester.pumpAndSettle();
+
+      // Verify text still preserved after collapse
+      expect(find.text(testInput), findsOneWidget);
+
+      // 8. Enter multi-line text and test smooth internal scrolling
+      final multiLineText = List.generate(20, (i) => 'Line $i: येथे पर्यावरणाचे महत्त्व या विषयावर एक सोपा मराठी पॅराग्राफ').join('\n');
+      await tester.enterText(textFieldFinder, multiLineText);
+      await tester.pumpAndSettle();
+
+      await tester.drag(textFieldFinder, const Offset(0, -80));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
   });
 }
+

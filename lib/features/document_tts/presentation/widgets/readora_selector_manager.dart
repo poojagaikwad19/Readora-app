@@ -17,4 +17,13 @@ class ReadoraSelectorManager {
       _activeCloseCallback = null;
     }
   }
+
+  static void closeActive() {
+    if (_activeCloseCallback != null) {
+      try {
+        _activeCloseCallback!();
+      } catch (_) {}
+      _activeCloseCallback = null;
+    }
+  }
 }

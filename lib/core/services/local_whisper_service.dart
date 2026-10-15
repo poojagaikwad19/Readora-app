@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
@@ -26,22 +27,73 @@ class LocalWhisperService {
 
   final WhisperController _whisperController = WhisperController();
   bool _isDownloading = false;
+  Future<void>? _activeExecution;
 
   bool get isDownloading => _isDownloading;
 
-  Future<void> ensureModelDownloaded() async {
-    if (_isDownloading) return;
-    _isDownloading = true;
+  Future<WhisperModel> _resolveAvailableModel() async {
+    // 1. Check for pre-downloaded base model (~140 MB, optimal for mobile)
     try {
-      debugPrint('📥 [WhisperController] Ensuring WhisperModel.small is ready...');
-      await _whisperController.downloadModel(WhisperModel.small);
-      debugPrint('✅ [WhisperController] WhisperModel.small ready');
-    } catch (e) {
-      debugPrint('❌ [WhisperController] Model download/check error: $e');
-      rethrow;
-    } finally {
-      _isDownloading = false;
+      final basePath = await _whisperController.getPath(WhisperModel.base);
+      final baseFile = File(basePath);
+      if (baseFile.existsSync() && baseFile.lengthSync() > 50 * 1024 * 1024) {
+        debugPrint('✅ Found pre-downloaded WhisperModel.base (${(baseFile.lengthSync() / (1024 * 1024)).toStringAsFixed(1)} MB)');
+        return WhisperModel.base;
+      }
+    } catch (_) {}
+
+    // 2. Check for pre-downloaded tiny model (~75 MB, ultra-fast)
+    try {
+      final tinyPath = await _whisperController.getPath(WhisperModel.tiny);
+      final tinyFile = File(tinyPath);
+      if (tinyFile.existsSync() && tinyFile.lengthSync() > 20 * 1024 * 1024) {
+        debugPrint('✅ Found pre-downloaded WhisperModel.tiny (${(tinyFile.lengthSync() / (1024 * 1024)).toStringAsFixed(1)} MB)');
+        return WhisperModel.tiny;
+      }
+    } catch (_) {}
+
+    // 3. Check for pre-downloaded small model
+    try {
+      final smallPath = await _whisperController.getPath(WhisperModel.small);
+      final smallFile = File(smallPath);
+      if (smallFile.existsSync() && smallFile.lengthSync() > 100 * 1024 * 1024) {
+        debugPrint('✅ Found pre-downloaded WhisperModel.small (${(smallFile.lengthSync() / (1024 * 1024)).toStringAsFixed(1)} MB)');
+        return WhisperModel.small;
+      }
+    } catch (_) {}
+
+    // Default to base model (140 MB vs 466 MB small): 3x faster download and 3-5x faster inference
+    return WhisperModel.base;
+  }
+
+  Future<WhisperModel> ensureModelDownloaded() async {
+    final modelToUse = await _resolveAvailableModel();
+    final modelPath = await _whisperController.getPath(modelToUse);
+    final modelFile = File(modelPath);
+
+    // If file is 0-byte or corrupt from interrupted download, clean it up
+    if (modelFile.existsSync() && modelFile.lengthSync() < 10 * 1024 * 1024) {
+      debugPrint('⚠️ Model file at $modelPath is incomplete (${modelFile.lengthSync()} bytes). Removing...');
+      try {
+        modelFile.deleteSync();
+      } catch (_) {}
     }
+
+    if (!modelFile.existsSync()) {
+      if (_isDownloading) return modelToUse;
+      _isDownloading = true;
+      try {
+        debugPrint('📥 [WhisperController] Downloading ${modelToUse.name} model...');
+        await _whisperController.downloadModel(modelToUse);
+        debugPrint('✅ [WhisperController] ${modelToUse.name} ready');
+      } catch (e) {
+        debugPrint('❌ [WhisperController] Model download error: $e');
+        rethrow;
+      } finally {
+        _isDownloading = false;
+      }
+    }
+    return modelToUse;
   }
 
   Future<String> _convertToWav16kMono(String inputFilePath) async {
@@ -49,8 +101,8 @@ class LocalWhisperService {
       final tempDir = await getTemporaryDirectory();
       final outputPath = '${tempDir.path}/whisper_converted_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-      debugPrint('🔄 [FFmpeg] Decoding & resampling audio: $inputFilePath -> $outputPath (16kHz 16-bit Mono WAV)...');
-      final session = await FFmpegKit.execute('-y -i "$inputFilePath" -ar 16000 -ac 1 -c:a pcm_s16le "$outputPath"');
+      debugPrint('🔄 [FFmpeg] Resampling audio: $inputFilePath -> $outputPath (16kHz Mono WAV)...');
+      final session = await FFmpegKit.execute('-y -i "$inputFilePath" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$outputPath"');
       final returnCode = await session.getReturnCode();
 
       if (ReturnCode.isSuccess(returnCode) && File(outputPath).existsSync() && File(outputPath).lengthSync() > 100) {
@@ -70,11 +122,31 @@ class LocalWhisperService {
     String audioFilePath, {
     required String language,
   }) async {
+    while (_activeExecution != null) {
+      try {
+        await _activeExecution;
+      } catch (_) {}
+    }
+    final completer = Completer<void>();
+    _activeExecution = completer.future;
+
+    try {
+      return await _transcribeAudioDetailedInternal(audioFilePath, language: language);
+    } finally {
+      completer.complete();
+      _activeExecution = null;
+    }
+  }
+
+  Future<WhisperTranscriptionResult> _transcribeAudioDetailedInternal(
+    String audioFilePath, {
+    required String language,
+  }) async {
     if (!File(audioFilePath).existsSync()) {
       throw Exception('Audio file not found at $audioFilePath');
     }
 
-    // Explicit language code mapping ('marathi'/'mr' -> 'mr', 'hindi'/'hi' -> 'hi', 'english'/'en' -> 'en')
+    // Explicit language code mapping ('marathi'/'mr' -> 'mr', 'hindi'/'hi' -> 'hi', 'english'/'en' -> 'en', 'auto' -> 'auto')
     String langCode = language.toLowerCase().trim();
     if (langCode == 'marathi' || langCode == 'mr' || langCode == 'mr-in') {
       langCode = 'mr';
@@ -82,12 +154,28 @@ class LocalWhisperService {
       langCode = 'hi';
     } else if (langCode == 'english' || langCode == 'en') {
       langCode = 'en';
+    } else if (langCode == 'auto' || langCode.isEmpty) {
+      langCode = 'auto';
+    }
+
+    // Smart filename hint fallback: If filename clearly indicates Marathi or Hindi, avoid defaulting to English
+    final audioFileName = audioFilePath.split(RegExp(r'[/\\]')).last.toLowerCase();
+    if (audioFileName.contains('marathi') || RegExp(r'[\b_\-]mr[\b_\-\.]').hasMatch(audioFileName)) {
+      if (langCode != 'mr') {
+        debugPrint('🎙️ [LOCAL WHISPER] Audio filename "$audioFileName" contains Marathi indicator. Setting langCode to "mr".');
+        langCode = 'mr';
+      }
+    } else if (audioFileName.contains('hindi') || RegExp(r'[\b_\-]hi[\b_\-\.]').hasMatch(audioFileName)) {
+      if (langCode != 'hi') {
+        debugPrint('🎙️ [LOCAL WHISPER] Audio filename "$audioFileName" contains Hindi indicator. Setting langCode to "hi".');
+        langCode = 'hi';
+      }
     }
 
     debugPrint('🎙️ [LOCAL WHISPER] Target language: "$language" -> Whisper code "$langCode"');
 
-    // Ensure official multilingual WhisperModel.small is ready
-    await ensureModelDownloaded();
+    // Ensure model is ready (prioritizes pre-downloaded WhisperModel.small)
+    final modelToUse = await ensureModelDownloaded();
 
     // Convert input audio file to 16kHz Mono WAV required by whisper_ggml / whisper.cpp
     final convertedAudioPath = await _convertToWav16kMono(audioFilePath);
@@ -95,10 +183,11 @@ class LocalWhisperService {
     debugPrint('⚡ [LOCAL WHISPER] Executing WhisperController.transcribe with segments...');
     debugPrint('   📁 Audio File: $convertedAudioPath');
     debugPrint('   🌐 Language: $langCode');
+    debugPrint('   🤖 Model: ${modelToUse.name}');
 
     try {
       final res = await _whisperController.transcribe(
-        model: WhisperModel.small,
+        model: modelToUse,
         audioPath: convertedAudioPath,
         lang: langCode,
         withSegments: true,

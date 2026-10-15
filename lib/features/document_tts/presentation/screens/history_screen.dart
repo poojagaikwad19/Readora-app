@@ -127,16 +127,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
-            tooltip: 'Refresh',
-            onPressed: () {
-              ref.read(documentTtsNotifierProvider.notifier).loadUserDocuments();
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
@@ -256,7 +246,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => PdfReaderScreen(document: doc),
+                                  builder: (context) => PdfReaderScreen(document: doc, autoPlayAudio: true),
                                 ),
                               );
                             },

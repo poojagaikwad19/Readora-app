@@ -163,16 +163,6 @@ class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
       backgroundColor: isDark ? const Color(0xFF0F172A) : AppColors.background,
       appBar: AppBar(
         title: const Text('Downloads'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Refresh',
-            onPressed: () {
-              notifier.loadDownloads();
-              _checkFilesExistence();
-            },
-          ),
-        ],
       ),
       body: downloadsState.isLoading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))

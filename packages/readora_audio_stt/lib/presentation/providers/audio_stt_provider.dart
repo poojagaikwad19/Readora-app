@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../config/stt_config.dart';
 import '../../config/stt_language.dart';
 import '../../domain/audio_stt_result.dart';
 import '../../domain/live_stt_event.dart';

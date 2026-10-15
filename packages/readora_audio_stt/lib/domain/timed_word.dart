@@ -4,12 +4,15 @@ class TimedWord {
   final int endMs;
   final double confidence;
 
+  String get text => word;
+
   const TimedWord({
-    required this.word,
+    String? word,
+    String? text,
     required this.startMs,
     required this.endMs,
     this.confidence = 1.0,
-  });
+  }) : word = word ?? text ?? '';
 
   factory TimedWord.fromJson(Map<String, dynamic> json) {
     return TimedWord(

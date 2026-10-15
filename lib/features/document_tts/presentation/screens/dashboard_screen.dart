@@ -295,13 +295,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2E2452) : AppColors.accentPill,
-                borderRadius: BorderRadius.circular(10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(9),
+              child: Image.asset(
+                'assets/images/R-logo.png',
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
               ),
-              child: Icon(Icons.record_voice_over_rounded, color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary, size: 20),
             ),
             const SizedBox(width: 10),
             Text(
@@ -368,49 +369,194 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           _buildProfileTab(user, ttsState, stats),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: context.surfaceBg,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
-              blurRadius: 16,
-              offset: const Offset(0, -4),
-            ),
-          ],
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: context.surfaceBg,
-          selectedItemColor: isDark ? const Color(0xFFA78BFA) : AppColors.primary,
-          unselectedItemColor: context.textMutedColor,
-          selectedFontSize: 11,
-          unselectedFontSize: 11,
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
-          elevation: 0,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.grid_view_rounded),
-              activeIcon: Icon(Icons.grid_view_rounded),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded),
-              activeIcon: Icon(Icons.person_rounded),
-              label: 'Profile',
-            ),
-          ],
-        ),
-      ),
+      bottomNavigationBar: _buildRaisedBottomNavigationBar(context, isDark),
     ),
   );
 }
+
+  Widget _buildRaisedBottomNavigationBar(BuildContext context, bool isDark) {
+    final mediaQuery = MediaQuery.of(context);
+    // When software keyboard is visible, collapse so it does not float over inputs
+    if (mediaQuery.viewInsets.bottom > 0) {
+      return const SizedBox.shrink();
+    }
+
+    final bottomPadding = mediaQuery.padding.bottom;
+    final isNarrow = mediaQuery.size.width < 340;
+    final buttonDiameter = isNarrow ? 62.0 : 68.0;
+    const raisedHeight = 20.0;
+    const barHeight = 56.0;
+
+    return SizedBox(
+      height: barHeight + raisedHeight + bottomPadding,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.bottomCenter,
+        children: [
+          // 1. Navigation Bar Base with rounded upper corners
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: barHeight + bottomPadding,
+            child: Container(
+              decoration: BoxDecoration(
+                color: context.surfaceBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+                border: Border(
+                  top: BorderSide(
+                    color: context.borderColor.withOpacity(isDark ? 0.3 : 0.6),
+                    width: 1,
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.35 : 0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: EdgeInsets.only(bottom: bottomPadding),
+                child: Row(
+                  children: [
+                    // Left Destination: Home
+                    Expanded(
+                      child: _buildBottomNavItem(
+                        icon: Icons.grid_view_rounded,
+                        activeIcon: Icons.grid_view_rounded,
+                        label: 'Home',
+                        isSelected: _currentIndex == 0,
+                        onTap: () {
+                          if (_currentIndex != 0) {
+                            setState(() {
+                              _currentIndex = 0;
+                            });
+                          }
+                        },
+                        isDark: isDark,
+                      ),
+                    ),
+
+                    // Centre reservation spacing for the raised logo
+                    SizedBox(width: buttonDiameter + 12),
+
+                    // Right Destination: Profile
+                    Expanded(
+                      child: _buildBottomNavItem(
+                        icon: Icons.person_outline_rounded,
+                        activeIcon: Icons.person_rounded,
+                        label: 'Profile',
+                        isSelected: _currentIndex == 1,
+                        onTap: () {
+                          if (_currentIndex != 1) {
+                            setState(() {
+                              _currentIndex = 1;
+                            });
+                          }
+                        },
+                        isDark: isDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 2. Raised Centre Logo Button
+          Positioned(
+            top: 0,
+            child: Semantics(
+              label: 'Readora Home',
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (_currentIndex != 0) {
+                    setState(() {
+                      _currentIndex = 0;
+                    });
+                  }
+                },
+                child: Container(
+                  width: buttonDiameter,
+                  height: buttonDiameter,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFFC4B5FD),
+                      width: 2.0,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF5B4DFF)).withOpacity(0.25),
+                        blurRadius: 12,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/R-logo.png',
+                      width: buttonDiameter,
+                      height: buttonDiameter,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomNavItem({
+    required IconData icon,
+    required IconData activeIcon,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    final activeColor = isDark ? const Color(0xFFA78BFA) : AppColors.primary;
+    final inactiveColor = context.textMutedColor;
+    final color = isSelected ? activeColor : inactiveColor;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                isSelected ? activeIcon : icon,
+                color: color,
+                size: 22,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   // Helper to safely extract 1-2 character user initials
   String _getUserInitials(String? name) {
@@ -520,7 +666,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onPlaySpeech: () {
                     ref.read(documentTtsNotifierProvider.notifier).setActiveDocument(doc);
                     _textController.text = doc.text;
-                    _handleGenerateSpeech();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => PdfReaderScreen(document: doc, autoPlayAudio: true),
+                      ),
+                    );
                   },
                 );
               },
@@ -592,7 +743,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         onPlaySpeech: () {
                           ref.read(documentTtsNotifierProvider.notifier).setActiveDocument(doc);
                           _textController.text = doc.text;
-                          _handleGenerateSpeech();
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => PdfReaderScreen(document: doc, autoPlayAudio: true),
+                            ),
+                          );
                         },
                       );
                     },
@@ -805,85 +961,358 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  // TAB 3: PROFILE & SETTINGS TAB
+  // TAB 1: PROFILE TAB
   Widget _buildProfileTab(dynamic user, DocumentTtsState ttsState, Map<String, String> stats) {
     final isDark = context.isDark;
+    final initials = _getUserInitials(user?.name);
+    final String userName = (user?.name != null && (user!.name as String).trim().isNotEmpty)
+        ? (user.name as String).trim()
+        : 'Readora User';
+    final String userEmail = (user?.email != null && (user!.email as String).trim().isNotEmpty)
+        ? (user.email as String).trim()
+        : 'user@readora.app';
+
+    const double headerHeight = 156.0;
+    const double headerCardTopOffset = 126.0;
+    const double avatarDiameter = 84.0;
+    final bottomNavPadding = 96.0 + MediaQuery.of(context).padding.bottom;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
+      padding: EdgeInsets.only(bottom: bottomNavPadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Profile Card
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: context.cardBg,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: context.borderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.2 : 0.03),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor: AppColors.primary,
-                  child: Text(
-                    user?.name.isNotEmpty == true ? user!.name[0].toUpperCase() : 'U',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 32),
+          // Curved Header + Overlapping Avatar + Rounded Account Card
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.topCenter,
+            children: [
+              // 1. Purple Gradient Header with subtle lavender curved accent
+              CustomPaint(
+                size: const Size(double.infinity, headerHeight),
+                painter: ProfileHeaderCurvedPainter(isDark: isDark),
+                child: SizedBox(
+                  height: headerHeight,
+                  width: double.infinity,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 20.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Profile',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Your Readora account',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.88),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  user?.name ?? 'Readora User',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: context.textPrimaryColor),
+              ),
+
+              // 2. Rounded Account Details Card
+              Container(
+                margin: const EdgeInsets.only(
+                  top: headerCardTopOffset,
+                  left: 20.0,
+                  right: 20.0,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  user?.email ?? 'user@readora.app',
-                  style: TextStyle(fontSize: 13, color: context.textSecondaryColor),
+                padding: const EdgeInsets.fromLTRB(20.0, 54.0, 20.0, 24.0),
+                decoration: BoxDecoration(
+                  color: context.cardBg,
+                  borderRadius: BorderRadius.circular(20.0),
+                  border: Border.all(
+                    color: isDark ? context.borderColor.withOpacity(0.4) : const Color(0xFFF1F5F9),
+                    width: 1.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(isDark ? 0.25 : 0.05),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // User Name
+                    Text(
+                      userName,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: context.textPrimaryColor,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+
+                    // User Email
+                    Text(
+                      userEmail,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: context.textSecondaryColor,
+                      ),
+                    ),
+
+                    // Account Status Badge (only when authenticated user is present)
+                    if (user != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: AppColors.success.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 14),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Readora Account Active',
+                                style: const TextStyle(
+                                  color: AppColors.success,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 11,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    // Subtle Divider
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20.0),
+                      child: Divider(
+                        color: isDark ? context.borderColor.withOpacity(0.4) : const Color(0xFFF1F5F9),
+                        height: 1,
+                        thickness: 1,
+                      ),
+                    ),
+
+                    // Account Section Heading
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Account',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Read-only Row 1: Name
+                    _buildAccountDetailRow(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Name',
+                      value: userName,
+                      isDark: isDark,
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Read-only Row 2: Email
+                    _buildAccountDetailRow(
+                      icon: Icons.mail_outline_rounded,
+                      label: 'Email',
+                      value: userEmail,
+                      isDark: isDark,
+                    ),
+                  ],
+                ),
+              ),
+
+              // 3. Circular Initials Avatar Overlapping Header & Card
+              Positioned(
+                top: headerCardTopOffset - (avatarDiameter / 2),
+                child: Container(
+                  width: avatarDiameter,
+                  height: avatarDiameter,
                   decoration: BoxDecoration(
-                    color: AppColors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xFF5B3FF5),
+                        Color(0xFF8B5CF6),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: isDark ? context.cardBg : Colors.white,
+                      width: 4.0,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF5B3FF5).withOpacity(0.3),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
                   ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
+                  alignment: Alignment.center,
+                  child: Text(
+                    initials.isNotEmpty ? initials : 'U',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 30,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // 4. Sign-out Button Below the Card
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            child: Material(
+              color: isDark ? const Color(0xFF2C1619) : const Color(0xFFFDF2F2),
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                onTap: _isLoggingOut ? null : _confirmAndLogout,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFFEF4444).withOpacity(0.4)
+                          : const Color(0xFFFCA5A5),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.check_circle_rounded, color: AppColors.success, size: 14),
-                      SizedBox(width: 6),
+                      if (_isLoggingOut) ...[
+                        SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ] else ...[
+                        Icon(
+                          Icons.logout_rounded,
+                          color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+                          size: 19,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       Text(
-                        'Readora Account Active',
-                        style: TextStyle(color: AppColors.success, fontWeight: FontWeight.bold, fontSize: 11),
+                        'Sign Out of Readora',
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
 
-          // Logout Action
-          ElevatedButton.icon(
-            onPressed: _confirmAndLogout,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error.withOpacity(0.1),
-              foregroundColor: AppColors.error,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+  // Account Detail Read-Only Row
+  Widget _buildAccountDetailRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.04) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.06) : const Color(0xFFE2E8F0),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+              borderRadius: BorderRadius.circular(10),
             ),
-            icon: const Icon(Icons.logout_rounded),
-            label: const Text('Sign Out of Readora', style: TextStyle(fontWeight: FontWeight.bold)),
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B3FF5),
+              size: 19,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: context.textMutedColor,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: context.textPrimaryColor,
+                  ),
+                  softWrap: true,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1292,6 +1721,69 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
       ),
     );
+  }
+}
+
+/// Custom painter for Readora's Profile screen curved purple gradient header
+/// with a layered lavender bottom edge.
+class ProfileHeaderCurvedPainter extends CustomPainter {
+  final bool isDark;
+
+  const ProfileHeaderCurvedPainter({required this.isDark});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. Subtle lavender accent layer (peeks out underneath the gradient)
+    final lavenderPaint = Paint()
+      ..color = isDark
+          ? const Color(0xFF7C6FA0).withOpacity(0.35)
+          : const Color(0xFFDDD6FE)
+      ..style = PaintingStyle.fill;
+
+    final lavenderPath = Path()
+      ..lineTo(0, size.height - 10)
+      ..quadraticBezierTo(
+        size.width / 2,
+        size.height + 8,
+        size.width,
+        size.height - 10,
+      )
+      ..lineTo(size.width, 0)
+      ..close();
+
+    canvas.drawPath(lavenderPath, lavenderPaint);
+
+    // 2. Main purple gradient layer (#5B3FF5 -> #8B5CF6)
+    final gradient = const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF5B3FF5),
+        Color(0xFF8B5CF6),
+      ],
+    );
+
+    final gradientPaint = Paint()
+      ..shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..style = PaintingStyle.fill;
+
+    final gradientPath = Path()
+      ..lineTo(0, size.height - 18)
+      ..quadraticBezierTo(
+        size.width / 2,
+        size.height,
+        size.width,
+        size.height - 18,
+      )
+      ..lineTo(size.width, 0)
+      ..close();
+
+    canvas.drawPath(gradientPath, gradientPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant ProfileHeaderCurvedPainter oldDelegate) {
+    return oldDelegate.isDark != isDark;
   }
 }
 

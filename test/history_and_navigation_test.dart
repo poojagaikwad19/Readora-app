@@ -281,7 +281,7 @@ void main() {
 
       // Bottom Navigation items
       expect(find.text('Home'), findsWidgets);
-      expect(find.text('Profile'), findsOneWidget);
+      expect(find.text('Profile'), findsWidgets);
       expect(find.text('My Docs'), findsNothing);
       expect(find.text('Convert'), findsNothing);
 
@@ -364,7 +364,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Tap Profile tab
-      await tester.tap(find.text('Profile'));
+      await tester.tap(find.text('Profile').last);
       await tester.pumpAndSettle();
 
       // We are on profile tab (Sign Out of Readora is visible)
@@ -377,6 +377,51 @@ void main() {
 
       // Back returns to Home tab (Sign Out of Readora is gone from active view)
       expect(find.text('Sign Out of Readora'), findsNothing);
+      expect(find.text('Choose Feature'), findsOneWidget);
+    });
+
+    testWidgets('Raised centre logo button has "Readora Home" label and navigates to Home',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            storageServiceProvider.overrideWithValue(storage),
+          ],
+          child: const MaterialApp(
+            home: DashboardScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify centre logo button is present with accessibility label
+      final centreButton = find.bySemanticsLabel('Readora Home');
+      expect(centreButton, findsOneWidget);
+
+      // Verify Home and Profile tabs exist
+      expect(find.text('Home'), findsWidgets);
+      expect(find.text('Profile'), findsWidgets);
+
+      // Navigate to Profile tab
+      await tester.tap(find.text('Profile').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Sign Out of Readora'), findsOneWidget);
+
+      // Tap raised centre logo button
+      await tester.tap(centreButton);
+      await tester.pumpAndSettle();
+
+      // Returns to Home dashboard
+      expect(find.text('Sign Out of Readora'), findsNothing);
+      expect(find.text('Choose Feature'), findsOneWidget);
+
+      // Tap centre logo again while already on Home (preserves current screen)
+      await tester.tap(centreButton);
+      await tester.pumpAndSettle();
       expect(find.text('Choose Feature'), findsOneWidget);
     });
   });

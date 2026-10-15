@@ -23,19 +23,19 @@ class LanguageSegmentedControl extends StatelessWidget {
           color: Theme.of(context).dividerColor.withOpacity(0.2),
         ),
       ),
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(3),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: SttLanguage.values.map((lang) {
           final isSelected = lang == selected;
           return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 1.5),
             child: InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: () => onLanguageChanged(lang),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: isSelected ? primaryColor : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
@@ -46,7 +46,7 @@ class LanguageSegmentedControl extends StatelessWidget {
                     Text(
                       lang.nativeName,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: isSelected
                             ? Colors.white
@@ -56,7 +56,7 @@ class LanguageSegmentedControl extends StatelessWidget {
                     Text(
                       lang.displayName,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 9.5,
                         color: isSelected
                             ? Colors.white.withOpacity(0.85)
                             : Theme.of(context).hintColor,

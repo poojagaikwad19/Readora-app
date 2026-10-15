@@ -2,13 +2,33 @@ import 'dart:io';
 
 class ApiEndpoints {
   // Default base URL fallback
+  // For Android Real Device (ADB reverse / USB): 127.0.0.1:5000
   // For Android Emulator: 10.0.2.2:5000
-  // For iOS / Desktop / Web / Real Device on local network: 127.0.0.1:5000 or custom IP
+  // For Local Network / Wi-Fi: 192.168.1.68:5000
+  // For iOS / Desktop / Web: localhost:5000
   static String get defaultBaseUrl {
     if (Platform.isAndroid) {
-      return 'http://10.0.2.2:5000/api';
+      return 'http://127.0.0.1:5000/api';
     } else {
       return 'http://localhost:5000/api';
+    }
+  }
+
+  /// List of candidate backend API URLs across local dev environments
+  static List<String> get candidateBaseUrls {
+    if (Platform.isAndroid) {
+      return const [
+        'http://127.0.0.1:5000/api',     // USB / ADB Reverse on physical device
+        'http://192.168.1.68:5000/api',    // Local Wi-Fi network host
+        'http://10.0.2.2:5000/api',        // Android Emulator host loopback
+        'http://localhost:5000/api',
+      ];
+    } else {
+      return const [
+        'http://localhost:5000/api',
+        'http://127.0.0.1:5000/api',
+        'http://192.168.1.68:5000/api',
+      ];
     }
   }
 

@@ -22,16 +22,7 @@ class ApiClient {
 
   ApiClient(this._storageService) : _baseUrl = '' {
     final savedUrl = _storageService.getBaseUrl();
-    if (savedUrl != null &&
-        (savedUrl.contains('127.0.0.1') ||
-         savedUrl.contains('192.168.1.50') ||
-         savedUrl.contains('192.168.1.59')) &&
-        Platform.isAndroid) {
-      _baseUrl = ApiEndpoints.defaultBaseUrl;
-      _storageService.saveBaseUrl(_baseUrl);
-    } else {
-      _baseUrl = savedUrl ?? ApiEndpoints.defaultBaseUrl;
-    }
+    _baseUrl = savedUrl ?? ApiEndpoints.defaultBaseUrl;
   }
 
   String get baseUrl => _baseUrl;
@@ -79,11 +70,7 @@ class ApiClient {
   Future<dynamic> _executeWithFallback(Future<dynamic> Function(String currentBaseUrl) requestFn) async {
     final urlsToTry = <String>[
       if (_baseUrl.isNotEmpty) _baseUrl,
-      'http://192.168.1.68:5000/api',
-      ApiEndpoints.defaultBaseUrl,
-      if (Platform.isAndroid) 'http://10.0.2.2:5000/api',
-      'http://127.0.0.1:5000/api',
-      'http://localhost:5000/api',
+      ...ApiEndpoints.candidateBaseUrls,
     ].where((url) => url.isNotEmpty).toSet().toList();
 
     dynamic lastException;

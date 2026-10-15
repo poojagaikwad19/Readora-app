@@ -11,6 +11,7 @@ import '../widgets/readora_voice_selector.dart';
 import '../widgets/readora_language_selector.dart';
 import '../widgets/original_audio_player.dart';
 import '../widgets/timed_transcript_viewer.dart';
+import '../widgets/readora_selector_manager.dart';
 import '../../../settings/domain/settings_model.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
 import 'package:flutter/foundation.dart';
@@ -18,6 +19,7 @@ import 'package:audioplayers/audioplayers.dart';
 import '../../domain/document_model.dart';
 import '../../domain/tts_response_model.dart';
 import '../../domain/voice_model.dart';
+import 'package:readora_audio_stt/readora_audio_stt.dart' as readora_stt hide TimedWord;
 
 enum UploadMode { tts, stt, all }
 
@@ -97,6 +99,8 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
   String? _sourceLanguage;         // Original detected language
   int _ttsInputTypeIndex = 0; // 0: Upload Document, 1: Enter Text
   final TextEditingController _textInputController = TextEditingController();
+  final ScrollController _textInputScrollController = ScrollController();
+  bool _isSpeechSettingsExpanded = false;
   int _sttRequestSeq = 0; // Request token to ignore superseded/obsolete STT responses
 
   @override
@@ -132,6 +136,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
   @override
   void dispose() {
     _textInputController.dispose();
+    _textInputScrollController.dispose();
     if (_stopAudioOnLeave) {
       try {
         _ttsNotifier?.stopAudioAndClearQueue();
@@ -235,18 +240,38 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
 
       _sttRequestSeq++;
 
+      String? detectedFileLang;
+      if (widget.mode == UploadMode.stt) {
+        final lower = fileName.toLowerCase();
+        if (lower.contains('marathi') || RegExp(r'[\b_\-]mr[\b_\-\.]').hasMatch(lower)) {
+          detectedFileLang = 'marathi';
+        } else if (lower.contains('hindi') || RegExp(r'[\b_\-]hi[\b_\-\.]').hasMatch(lower)) {
+          detectedFileLang = 'hindi';
+        } else if (lower.contains('english') || RegExp(r'[\b_\-]en[\b_\-\.]').hasMatch(lower)) {
+          detectedFileLang = 'english';
+        }
+      }
+
       setState(() {
         _selectedFilePath = filePath;
         _selectedFileName = fileName;
         _originalExtractedText = null;
         _extractedText = null;
-        _sourceLanguage = null;
+        _sourceLanguage = detectedFileLang ?? _sourceLanguage;
         _extractionError = null;
         _pageCount = 1;
+        if (widget.mode == UploadMode.stt) {
+          _isExtractingText = true;
+        }
       });
+
+      if (detectedFileLang != null) {
+        ref.read(documentTtsNotifierProvider.notifier).setSelectedSttLanguage(detectedFileLang);
+      }
 
       if (widget.mode == UploadMode.stt) {
         ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
+        _uploadAndExtract();
       } else {
         ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse();
         _extractTextFromFile(filePath);
@@ -424,9 +449,11 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
 
   void _removeSelectedFile() {
     _sttRequestSeq++;
+    ref.read(documentTtsNotifierProvider.notifier).cancelStt();
     ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
     ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse();
     setState(() {
+      _isExtractingText = false;
       _selectedFilePath = null;
       _selectedFileName = null;
       _extractedText = null;
@@ -434,6 +461,19 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       _sourceLanguage = null;
       _extractionError = null;
       _pageCount = 1;
+    });
+  }
+
+  void _cancelTranscription() {
+    _sttRequestSeq++;
+    ref.read(documentTtsNotifierProvider.notifier).cancelStt();
+    setState(() {
+      _isExtractingText = false;
+      _selectedFilePath = null;
+      _selectedFileName = null;
+      _extractionError = null;
+      _extractedText = null;
+      _originalExtractedText = null;
     });
   }
 
@@ -454,10 +494,9 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       return;
     }
 
-    final activeDocLang = ref.read(documentTtsNotifierProvider).activeDocument?.detectedLanguage;
-    final currentLang = _sourceLanguage ?? activeDocLang ?? ref.read(documentTtsNotifierProvider).selectedSttLanguage;
+    final currentLang = _sourceLanguage ?? ref.read(documentTtsNotifierProvider).selectedSttLanguage;
     String chosenLang = currentLang.toLowerCase().trim();
-    if (chosenLang != 'marathi' && chosenLang != 'hindi') {
+    if (chosenLang != 'marathi' && chosenLang != 'hindi' && chosenLang != 'auto') {
       chosenLang = 'english';
     }
 
@@ -506,9 +545,10 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
                       isExpanded: true,
                       isDense: true,
                       items: [
+                        DropdownMenuItem(value: 'auto', child: Text('Auto Detect', style: TextStyle(color: context.textPrimaryColor))),
+                        DropdownMenuItem(value: 'marathi', child: Text('Marathi (मराठी)', style: TextStyle(color: context.textPrimaryColor))),
+                        DropdownMenuItem(value: 'hindi', child: Text('Hindi (हिन्दी)', style: TextStyle(color: context.textPrimaryColor))),
                         DropdownMenuItem(value: 'english', child: Text('English', style: TextStyle(color: context.textPrimaryColor))),
-                        DropdownMenuItem(value: 'marathi', child: Text('Marathi', style: TextStyle(color: context.textPrimaryColor))),
-                        DropdownMenuItem(value: 'hindi', child: Text('Hindi', style: TextStyle(color: context.textPrimaryColor))),
                       ],
                       onChanged: (val) {
                         if (val != null) {
@@ -613,6 +653,10 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       if (ref.read(documentTtsNotifierProvider).isExtracting) return; // Prevent duplicate taps
 
       if (audioPath == null || !File(audioPath).existsSync()) {
+        setState(() {
+          _isExtractingText = false;
+          _extractionError = 'Original recording unavailable. Please select the audio file again.';
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Original recording unavailable. Please select the audio file again to re-transcribe.'),
@@ -622,23 +666,44 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
         return;
       }
 
+      try {
+        readora_stt.AudioFormatValidator.validate(audioPath);
+      } catch (valErr) {
+        setState(() {
+          _isExtractingText = false;
+          _extractionError = valErr.toString().replaceAll('Exception: ', '');
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(valErr.toString().replaceAll('Exception: ', '')),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        return;
+      }
+
+      setState(() {
+        _isExtractingText = true;
+        _extractionError = null;
+      });
+
       // Stop any active audio and clear old state before starting transcription
       await ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
 
       final thisSeq = ++_sttRequestSeq;
-      final activeDocLang = ref.read(documentTtsNotifierProvider).activeDocument?.detectedLanguage;
-      final sttLang = (_extractedText != null && _extractedText!.isNotEmpty)
-          ? (_sourceLanguage ?? activeDocLang ?? ref.read(documentTtsNotifierProvider).selectedSttLanguage)
-          : ref.read(documentTtsNotifierProvider).selectedSttLanguage;
+      // Capture configured language when request starts without altering settings
+      final selectedStt = ref.read(documentTtsNotifierProvider).selectedSttLanguage;
+      final configuredLang = _sourceLanguage ?? selectedStt;
 
       final doc = await ref
           .read(documentTtsNotifierProvider.notifier)
-          .transcribeAudioFile(audioPath, language: sttLang);
+          .transcribeAudioFile(audioPath, language: configuredLang);
 
       if (!mounted || thisSeq != _sttRequestSeq) return;
 
       if (doc != null) {
         setState(() {
+          _isExtractingText = false;
           _extractedText = doc.text;
           _originalExtractedText = doc.text;
           _sourceLanguage = doc.detectedLanguage;
@@ -654,6 +719,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       } else {
         final state = ref.read(documentTtsNotifierProvider);
         setState(() {
+          _isExtractingText = false;
           _extractionError = state.errorMessage ?? 'Audio transcription failed';
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -666,11 +732,13 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       return;
     } else {
       // Document TTS: generate speech for extracted/translated text!
-      final textToSpeech = (_extractedText != null && _extractedText!.trim().isNotEmpty)
-          ? _extractedText!.trim()
-          : (_selectedFilePath != null
-              ? ((await ref.read(documentTtsNotifierProvider.notifier).extractDocument(_selectedFilePath!))?.text ?? '')
-              : '');
+      final textToSpeech = (_ttsInputTypeIndex == 1)
+          ? _textInputController.text.trim()
+          : ((_extractedText != null && _extractedText!.trim().isNotEmpty)
+              ? _extractedText!.trim()
+              : (_selectedFilePath != null
+                  ? ((await ref.read(documentTtsNotifierProvider.notifier).extractDocument(_selectedFilePath!))?.text ?? '')
+                  : ''));
 
       if (!mounted) return;
       if (textToSpeech.isEmpty) {
@@ -728,8 +796,6 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
     final baseUrl = apiClient.baseUrl.replaceAll('/api', '');
 
     final bool hasSelectedFile = _selectedFilePath != null;
-    final bool isEnterTextMode = !isStt && _ttsInputTypeIndex == 1;
-    final bool showOptionsAndButton = hasSelectedFile || isEnterTextMode;
 
     return Scaffold(
       backgroundColor: context.scaffoldBg,
@@ -745,18 +811,10 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: context.textPrimaryColor),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.settings_outlined, color: context.textPrimaryColor),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Readora Settings')),
-              );
-            },
-          ),
-        ],
       ),
       body: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -764,7 +822,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
             if (isStt) ...[
               // === SPEECH TO TEXT TARGET LAYOUT ===
               if (_extractedText != null && _extractedText!.isNotEmpty) ...[
-                // STT RESULTS VIEW
+                // STT RESULTS VIEW (Screenshot 3)
                 // 1. Selected filename | Change file
                 _buildSttFileRow(primaryColor, ttsState.isExtracting),
                 const SizedBox(height: 10),
@@ -836,48 +894,8 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
                 ],
                 const SizedBox(height: 12),
               ] else ...[
-                // STT INITIAL UPLOAD / TRANSCRIBE VIEW
-                if (hasSelectedFile) ...[
-                  _buildSttFileRow(primaryColor, ttsState.isExtracting),
-                  if (_extractionError != null && _extractionError!.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _buildErrorCard(primaryColor),
-                  ],
-                  const SizedBox(height: 10),
-                  _buildSttLanguageDropdown(primaryColor),
-                  const SizedBox(height: 14),
-                  ElevatedButton(
-                    onPressed: (ttsState.isExtracting) ? null : _uploadAndExtract,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      elevation: 2,
-                    ),
-                    child: ttsState.isExtracting
-                        ? Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
-                              ),
-                              SizedBox(width: 10),
-                              Text('Transcribing Audio...', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                            ],
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Text('Transcribe Audio →', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                  ),
-                ] else ...[
-                  _buildSttEmptyState(primaryColor),
-                ],
+                // STT INITIAL UPLOAD / INLINE PROCESSING VIEW (Screenshot 1)
+                _buildSttEmptyState(primaryColor),
               ],
             ] else ...[
               // === TEXT TO SPEECH VIEW (TTS PRESERVED UNCHANGED) ===
@@ -925,112 +943,87 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
                 ] else ...[
                   _buildTtsEmptyState(primaryColor),
                 ],
-              ] else ...[
-                const Text(
-                  'ENTER TEXT',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.8),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  decoration: BoxDecoration(
-                    color: context.cardBg,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: context.borderColor),
+
+                if (hasSelectedFile) ...[
+                  const Text(
+                    'LANGUAGE',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.8),
                   ),
-                  child: TextField(
-                    controller: _textInputController,
-                    maxLines: 4,
-                    style: TextStyle(fontSize: 13, color: context.textPrimaryColor),
-                    decoration: InputDecoration(
-                      hintText: 'Type or paste text here to convert into speech...',
-                      hintStyle: TextStyle(color: context.textMutedColor),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.all(12),
-                    ),
+                  const SizedBox(height: 4),
+                  _buildTtsLanguageDropdown(ttsState, primaryColor),
+                  const SizedBox(height: 8),
+
+                  const Text(
+                    'VOICE',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.8),
                   ),
-                ),
-                const SizedBox(height: 8),
-              ],
+                  const SizedBox(height: 4),
+                  _buildTtsVoiceDropdown(ttsState, primaryColor),
+                  const SizedBox(height: 8),
 
-              if (showOptionsAndButton) ...[
-                const Text(
-                  'LANGUAGE',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.8),
-                ),
-                const SizedBox(height: 4),
-                _buildTtsLanguageDropdown(ttsState, primaryColor),
-                const SizedBox(height: 8),
-
-                const Text(
-                  'VOICE',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.textMuted, letterSpacing: 0.8),
-                ),
-                const SizedBox(height: 4),
-                _buildTtsVoiceDropdown(ttsState, primaryColor),
-                const SizedBox(height: 8),
-
-                if (_ttsInputTypeIndex == 0) ...[
                   _buildExtractedTextViewer(primaryColor),
                   const SizedBox(height: 12),
-                ],
 
-                if (ttsState.currentTtsResponse != null) ...[
-                  _buildCompactAudioPlayer(ttsState, primaryColor, baseUrl),
-                  const SizedBox(height: 12),
-                ],
+                  if (ttsState.currentTtsResponse != null) ...[
+                    _buildCompactAudioPlayer(ttsState, primaryColor, baseUrl),
+                    const SizedBox(height: 12),
+                  ],
 
-                ElevatedButton(
-                  onPressed: (ttsState.isExtracting || ttsState.isGeneratingSpeech || _isTranslating) ? null : _uploadAndExtract,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    elevation: 2,
-                    shadowColor: primaryColor.withOpacity(0.3),
+                  ElevatedButton(
+                    onPressed: (ttsState.isExtracting || ttsState.isGeneratingSpeech || _isTranslating) ? null : _uploadAndExtract,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 2,
+                      shadowColor: primaryColor.withValues(alpha: 0.3),
+                    ),
+                    child: ttsState.isGeneratingSpeech
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Generating Speech...',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          )
+                        : _isTranslating
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: const [
+                                  SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    'Translating Text...',
+                                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    ttsState.currentTtsResponse != null ? 'Re-generate Speech' : 'Convert to Speech →',
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
                   ),
-                  child: ttsState.isGeneratingSpeech
-                      ? Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
-                            ),
-                            SizedBox(width: 10),
-                            Text(
-                              'Generating Speech...',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        )
-                      : _isTranslating
-                          ? Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: const [
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
-                                ),
-                                SizedBox(width: 10),
-                                Text(
-                                  'Translating Text...',
-                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  ttsState.currentTtsResponse != null ? 'Re-generate Speech' : 'Convert to Speech →',
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                ),
+                ],
+              ] else ...[
+                _buildEnterTextView(ttsState, primaryColor, baseUrl),
               ],
             ],
           ],
@@ -1236,8 +1229,8 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       buttonLabel: 'Choose an audio file',
       buttonIcon: Icons.audio_file_outlined,
       formatChips: const ['MP3', 'WAV', 'M4A', 'AAC', 'FLAC', 'OGG'],
-      steps: const ['Upload', 'Choose language', 'Transcribe'],
-      tipText: 'Choose the language spoken in your recording.',
+      steps: const ['Upload', 'Transcribe', 'Read'],
+      tipText: 'Clear recordings help improve transcription accuracy.',
     );
   }
 
@@ -1519,6 +1512,11 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
             ? const Color(0xFFB7EBE1).withValues(alpha: 0.9)
             : const Color(0xFFDDD6FE).withValues(alpha: 0.9));
 
+    final bool isExtracting = _isExtractingText ||
+        ref.watch(documentTtsNotifierProvider.select((s) => s.isExtracting));
+    final bool isProcessing = isStt && isExtracting && _selectedFilePath != null;
+    final bool hasError = isStt && _extractionError != null && _extractionError!.isNotEmpty && !isProcessing;
+
     return CustomPaint(
       painter: DashedRectPainter(
         color: dashedBorderColor,
@@ -1543,106 +1541,246 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Upload icon in circular badge
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: iconColor.withValues(alpha: 0.10),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.cloud_upload_outlined,
-                size: 22,
-                color: iconColor,
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Primary upload button with subtle gradient, white text, and restrained shadow
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: buttonGradient,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: buttonShadowColor,
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: ElevatedButton.icon(
-                onPressed: _pickFile,
-                icon: Icon(buttonIcon, size: 18, color: Colors.white),
-                label: Text(
-                  buttonLabel,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 0,
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Supported format chips with tinted backgrounds and colored text
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 6,
-              runSpacing: 6,
-              children: formatChips.map((chip) {
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: chipBgColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: chipBorderColor,
-                      width: 0.9,
+        child: isProcessing
+            ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned(
+                    top: -12,
+                    right: -6,
+                    child: Semantics(
+                      label: 'Cancel transcription',
+                      button: true,
+                      child: IconButton(
+                        icon: Icon(Icons.close_rounded, size: 20, color: context.textSecondaryColor),
+                        tooltip: 'Cancel transcription',
+                        onPressed: _cancelTranscription,
+                        splashRadius: 20,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    chip,
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: chipTextColor,
-                      letterSpacing: 0.2,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14.0, horizontal: 20.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.8,
+                            valueColor: AlwaysStoppedAnimation<Color>(iconColor),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Transcribing in progress',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: context.textPrimaryColor,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _selectedFileName ?? 'Audio file',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: context.textSecondaryColor,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
+                ],
+              )
+            : hasError
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.error_outline_rounded,
+                            size: 22,
+                            color: AppColors.error,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          _selectedFileName ?? 'Audio file',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: context.textPrimaryColor,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _extractionError!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                if (ref.read(documentTtsNotifierProvider).isExtracting) return;
+                                _uploadAndExtract();
+                              },
+                              icon: const Icon(Icons.refresh_rounded, size: 15),
+                              label: const Text('Retry', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0D9488),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                elevation: 1,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            OutlinedButton.icon(
+                              onPressed: _removeSelectedFile,
+                              icon: const Icon(Icons.close_rounded, size: 15),
+                              label: const Text('Remove', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: context.textSecondaryColor,
+                                side: BorderSide(color: context.borderColor),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Upload icon in circular badge
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: iconColor.withValues(alpha: 0.10),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.cloud_upload_outlined,
+                          size: 22,
+                          color: iconColor,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Primary upload button with subtle gradient, white text, and restrained shadow
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: buttonGradient,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: buttonShadowColor,
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: ElevatedButton.icon(
+                          onPressed: _pickFile,
+                          icon: Icon(buttonIcon, size: 18, color: Colors.white),
+                          label: Text(
+                            buttonLabel,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            surfaceTintColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Supported format chips with tinted backgrounds and colored text
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: formatChips.map((chip) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: chipBgColor,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: chipBorderColor,
+                                width: 0.9,
+                              ),
+                            ),
+                            child: Text(
+                              chip,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: chipTextColor,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
       ),
     );
   }
@@ -1871,80 +2009,28 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
     );
   }
 
-  // STT Language Dropdown (English, Marathi, Hindi) - COMPACT
-  Widget _buildSttLanguageDropdown(Color primaryColor) {
-    final currentLang = ref.watch(
-      documentTtsNotifierProvider.select((s) => s.selectedSttLanguage),
-    );
-    final isDark = context.isDark;
-
-    final sttLanguages = [
-      {'code': 'english', 'label': 'English', 'value': 'english'},
-      {'code': 'marathi', 'label': 'Marathi', 'value': 'marathi'},
-      {'code': 'hindi', 'label': 'Hindi', 'value': 'hindi'},
-    ];
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-      decoration: BoxDecoration(
-        color: context.cardBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: sttLanguages.any((l) => l['value'] == currentLang.toLowerCase()) ? currentLang.toLowerCase() : 'english',
-          dropdownColor: context.cardBg,
-          isExpanded: true,
-          isDense: true,
-          icon: Icon(Icons.keyboard_arrow_down_rounded, color: primaryColor, size: 20),
-          items: sttLanguages.map((lang) {
-            return DropdownMenuItem<String>(
-              value: lang['value'],
-              child: Row(
-                children: [
-                  Text(
-                    'Language: ',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: context.textSecondaryColor),
-                  ),
-                  Text(
-                    lang['label']!,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.textPrimaryColor),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-          onChanged: (val) {
-            if (val != null) {
-              ref.read(documentTtsNotifierProvider.notifier).setSelectedSttLanguage(val);
-            }
-          },
-        ),
-      ),
-    );
-  }
 
   // TTS Language Selector - COMPACT & ANCHORED
-  Widget _buildTtsLanguageDropdown(_PdfUploadViewState ttsState, Color primaryColor) {
+  Widget _buildTtsLanguageDropdown(
+    _PdfUploadViewState ttsState,
+    Color primaryColor, {
+    Widget Function(BuildContext, String, bool)? builder,
+  }) {
     return ReadoraLanguageSelector(
       selectedLanguage: ttsState.selectedLanguage,
       onChanged: (val) {
         _handleLanguageChange(val);
       },
+      builder: builder,
     );
   }
 
   // TTS Voice Selector - COMPACT & ANCHORED
-  Widget _buildTtsVoiceDropdown(_PdfUploadViewState ttsState, Color primaryColor) {
+  Widget _buildTtsVoiceDropdown(
+    _PdfUploadViewState ttsState,
+    Color primaryColor, {
+    Widget Function(BuildContext, String, bool)? builder,
+  }) {
     List<VoiceModel> voices = ttsState.voices.isNotEmpty ? ttsState.voices : VoiceModel.defaultVoices();
 
     final Map<String, VoiceModel> uniqueVoicesMap = {};
@@ -1973,6 +2059,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       onVoiceSelected: (voiceId) {
         ref.read(documentTtsNotifierProvider.notifier).setSelectedVoice(voiceId);
       },
+      builder: builder,
     );
   }
 
@@ -2011,6 +2098,472 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
   // SLEEK CAPSULE AUDIO PLAYER MATCHING USER REFERENCE SCREENSHOT
   Widget _buildCompactAudioPlayer(_PdfUploadViewState ttsState, Color primaryColor, String baseUrl) {
     return const ReadoraAudioPlayer();
+  }
+
+  // Redesigned Text to Speech -> Enter Text View (Matching Reference)
+  Widget _buildEnterTextView(_PdfUploadViewState ttsState, Color primaryColor, String baseUrl) {
+    final isDark = context.isDark;
+    final isRunning = ttsState.isGeneratingSpeech || _isTranslating || ttsState.isExtracting;
+
+    // Responsive editor height: occupies ~40-45% of usable screen height on typical phones
+    final screenHeight = MediaQuery.of(context).size.height;
+    final double editorHeight = (screenHeight * 0.42).clamp(270.0, 440.0);
+
+    // Active Speech Settings Summary (e.g. "English · Roger")
+    final currentLangKey = ttsState.selectedLanguage.toLowerCase().trim();
+    final currentLangLabel = currentLangKey == 'marathi'
+        ? 'Marathi'
+        : (currentLangKey == 'hindi' ? 'Hindi' : 'English');
+
+    final settings = ref.read(settingsProvider);
+    final defaultForLang = settings.defaultVoiceForLanguage(ttsState.selectedLanguage);
+    List<VoiceModel> voices = ttsState.voices.isNotEmpty ? ttsState.voices : VoiceModel.defaultVoices();
+    final matchingVoice = voices.firstWhere(
+      (v) => v.voiceId == ttsState.selectedVoiceId,
+      orElse: () => voices.firstWhere(
+        (v) => v.voiceId == defaultForLang,
+        orElse: () => voices.isNotEmpty ? voices.first : VoiceModel.defaultVoices().first,
+      ),
+    );
+    final currentVoiceName = processVoiceForDisplay(matchingVoice).name;
+    final speechSettingsSummary = '$currentLangLabel · $currentVoiceName';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 1. Glowing lavender-to-mint header
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      const Color(0xFF7C3AED).withValues(alpha: 0.16),
+                      const Color(0xFF0D9488).withValues(alpha: 0.12),
+                    ]
+                  : [
+                      const Color(0xFFEDE9FE).withValues(alpha: 0.75),
+                      const Color(0xFFDDF7F2).withValues(alpha: 0.75),
+                    ],
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Give your words a voice',
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
+                  color: isDark ? Colors.white : const Color(0xFF1E1B4B),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Type or paste text, then choose how it sounds.',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 2. Large white text editor card with rounded corners and thin purple border
+        Container(
+          key: const Key('enter_text_editor_card'),
+          height: editorHeight,
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          decoration: BoxDecoration(
+            color: context.cardBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark ? const Color(0xFF8B5CF6).withValues(alpha: 0.5) : const Color(0xFFC7D2FE),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF7C3AED).withValues(alpha: isDark ? 0.2 : 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Your text',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: Theme(
+                  data: Theme.of(context).copyWith(
+                    scrollbarTheme: ScrollbarThemeData(
+                      thumbColor: WidgetStateProperty.all(primaryColor.withValues(alpha: 0.6)),
+                      radius: const Radius.circular(8),
+                      thickness: WidgetStateProperty.all(4.0),
+                    ),
+                  ),
+                  child: Scrollbar(
+                    controller: _textInputScrollController,
+                    thumbVisibility: true,
+                    radius: const Radius.circular(8),
+                    thickness: 4.0,
+                    child: TextField(
+                      controller: _textInputController,
+                      scrollController: _textInputScrollController,
+                      scrollPhysics: const ClampingScrollPhysics(),
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        height: 1.5,
+                        color: context.textPrimaryColor,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Start typing or paste your text here…',
+                        hintStyle: TextStyle(
+                          color: context.textMutedColor,
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(right: 12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _textInputController,
+                  builder: (context, value, _) {
+                    return Text(
+                      '${value.text.length} characters',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: context.textMutedColor,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 3. Compact collapsible Speech settings card
+        Container(
+          decoration: BoxDecoration(
+            color: context.cardBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: context.borderColor, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Collapsible header row
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () {
+                    ReadoraSelectorManager.closeActive();
+                    setState(() {
+                      _isSpeechSettingsExpanded = !_isSpeechSettingsExpanded;
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Speech settings',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (!_isSpeechSettingsExpanded) ...[
+                          Expanded(
+                            child: Text(
+                              speechSettingsSummary,
+                              textAlign: TextAlign.end,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                                color: context.textSecondaryColor,
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          const Spacer(),
+                        ],
+                        const SizedBox(width: 6),
+                        AnimatedRotation(
+                          turns: _isSpeechSettingsExpanded ? 0.5 : 0.0,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 22,
+                            color: isDark ? Colors.white70 : const Color(0xFF1E1B4B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+              // Expandable content containing existing Language & Voice dropdowns
+              ClipRect(
+                child: AnimatedCrossFade(
+                  firstChild: const SizedBox(width: double.infinity, height: 0),
+                  secondChild: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Divider(height: 1, thickness: 0.8, color: context.borderColor),
+                      _buildTtsLanguageDropdown(
+                        ttsState,
+                        primaryColor,
+                        builder: (context, currentLabel, isOpen) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: isDark ? const Color(0xFF312E81) : const Color(0xFFEDE9FE),
+                                  ),
+                                  child: const Icon(
+                                    Icons.public_rounded,
+                                    size: 20,
+                                    color: Color(0xFF6366F1),
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Language',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: context.textSecondaryColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        currentLabel,
+                                        style: TextStyle(
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: context.textPrimaryColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  isOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                                  size: 20,
+                                  color: isDark ? Colors.white70 : const Color(0xFF1E1B4B),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      Divider(height: 1, thickness: 0.8, color: context.borderColor),
+                      _buildTtsVoiceDropdown(
+                        ttsState,
+                        primaryColor,
+                        builder: (context, currentVoiceName, isOpen) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: isDark ? const Color(0xFF312E81) : const Color(0xFFEDE9FE),
+                                  ),
+                                  child: const Icon(
+                                    Icons.record_voice_over_rounded,
+                                    size: 19,
+                                    color: Color(0xFF6366F1),
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Voice',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: context.textSecondaryColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        currentVoiceName,
+                                        style: TextStyle(
+                                          fontSize: 14.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: context.textPrimaryColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  isOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                                  size: 20,
+                                  color: isDark ? Colors.white70 : const Color(0xFF1E1B4B),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  crossFadeState: _isSpeechSettingsExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 250),
+                  sizeCurve: Curves.easeInOut,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 4. Audio player (if speech has been generated)
+        if (ttsState.currentTtsResponse != null) ...[
+          _buildCompactAudioPlayer(ttsState, primaryColor, baseUrl),
+          const SizedBox(height: 14),
+        ],
+
+        // 5. Full-width purple gradient button
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _textInputController,
+          builder: (context, value, _) {
+            final hasText = value.text.trim().isNotEmpty;
+            final canPress = hasText && !isRunning;
+
+            return Container(
+              width: double.infinity,
+              height: 50,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: canPress
+                    ? const LinearGradient(
+                        colors: [Color(0xFF5B3FF5), Color(0xFF7C3AED)],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      )
+                    : null,
+                color: canPress ? null : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                boxShadow: canPress
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFF5B3FF5).withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : [],
+              ),
+              child: ElevatedButton(
+                onPressed: canPress ? _uploadAndExtract : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  disabledBackgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
+                child: isRunning
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'Generating Speech...',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ],
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            ttsState.currentTtsResponse != null ? 'Re-generate Speech →' : 'Convert to Speech →',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: canPress ? Colors.white : (isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
   }
 }
 

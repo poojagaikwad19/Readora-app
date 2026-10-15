@@ -6,11 +6,13 @@ import 'readora_selector_manager.dart';
 class ReadoraLanguageSelector extends StatefulWidget {
   final String selectedLanguage;
   final ValueChanged<String> onChanged;
+  final Widget Function(BuildContext context, String currentLabel, bool isOpen)? builder;
 
   const ReadoraLanguageSelector({
     super.key,
     required this.selectedLanguage,
     required this.onChanged,
+    this.builder,
   });
 
   @override
@@ -228,46 +230,48 @@ class _ReadoraLanguageSelectorState extends State<ReadoraLanguageSelector> {
       key: _fieldKey,
       onTap: _toggleDropdown,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: context.cardBg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: _isOpen ? AppColors.primary : context.borderColor,
-            width: _isOpen ? 1.5 : 1.0,
-          ),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.public_rounded,
-              size: 18,
-              color: AppColors.primary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                selectedLang['label']!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: context.textPrimaryColor,
+      child: widget.builder != null
+          ? widget.builder!(context, selectedLang['label']!, _isOpen)
+          : Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: context.cardBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isOpen ? AppColors.primary : context.borderColor,
+                  width: _isOpen ? 1.5 : 1.0,
                 ),
               ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.public_rounded,
+                    size: 18,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      selectedLang['label']!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: context.textPrimaryColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _isOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                    color: _isOpen ? AppColors.primary : context.textSecondaryColor,
+                    size: 20,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 4),
-            Icon(
-              _isOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-              color: _isOpen ? AppColors.primary : context.textSecondaryColor,
-              size: 20,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
