@@ -261,6 +261,9 @@ class MockDocumentTtsRepository implements DocumentTtsRepository {
   Future<List<DocumentModel>> getUserFiles() async => [];
 
   @override
+  Future<void> deleteFile(String id) async {}
+
+  @override
   Future<List<VoiceModel>> fetchVoices() async => VoiceModel.defaultVoices();
 
   @override

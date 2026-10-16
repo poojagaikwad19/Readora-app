@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../constants/api_endpoints.dart';
 import '../services/storage_service.dart';
 
@@ -127,11 +128,33 @@ class ApiClient {
     });
   }
 
+  Future<dynamic> put(String endpoint, Map<String, dynamic> body) async {
+    return _executeWithFallback((currentBaseUrl) async {
+      final url = Uri.parse('$currentBaseUrl$endpoint');
+      _logRequest('PUT', url, body: body);
+      try {
+        final response = await http
+            .put(
+              url,
+              headers: _getHeaders(),
+              body: jsonEncode(body),
+            )
+            .timeout(const Duration(seconds: 120));
+        return _processResponse('PUT', url, response);
+      } catch (e) {
+        _logError('PUT', url, e);
+        rethrow;
+      }
+    });
+  }
+
   Future<dynamic> uploadFile(
     String endpoint,
     String filePath,
     String fileFieldName, {
     Map<String, String>? fields,
+    String? filename,
+    MediaType? contentType,
   }) async {
     return _executeWithFallback((currentBaseUrl) async {
       final url = Uri.parse('$currentBaseUrl$endpoint');
@@ -143,7 +166,12 @@ class ApiClient {
           request.fields.addAll(fields);
         }
 
-        final file = await http.MultipartFile.fromPath(fileFieldName, filePath);
+        final file = await http.MultipartFile.fromPath(
+          fileFieldName,
+          filePath,
+          filename: filename,
+          contentType: contentType,
+        );
         request.files.add(file);
 
         final streamedResponse = await request.send().timeout(const Duration(seconds: 300));

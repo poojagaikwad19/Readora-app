@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/constants/api_endpoints.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../auth/domain/user_model.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../auth/presentation/screens/login_screen.dart';
+import '../../../auth/presentation/widgets/edit_name_dialog.dart';
+import '../../../auth/presentation/widgets/photo_options_bottom_sheet.dart';
 import '../../../common_widgets/app_button.dart';
 import '../../../common_widgets/language_selector.dart';
 import '../../../common_widgets/pdf_card.dart';
@@ -87,9 +91,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     });
 
     try {
-      // On confirmed logout, stop active audio and prevent stale callbacks from restarting it
-      await ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
-      await ref.read(documentTtsNotifierProvider.notifier).stopOriginalAudio();
+      // On confirmed logout, stop active audio, clear all user-scoped data, and prevent stale callbacks
+      await ref.read(documentTtsNotifierProvider.notifier).clearUserData();
       await ref.read(downloadsProvider.notifier).stopPlayback();
 
       await ref.read(authNotifierProvider.notifier).logout();
@@ -125,8 +128,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final apiClient = ref.read(apiClientProvider);
       _serverUrlController.text = apiClient.baseUrl;
+      final currentUserId = ref.read(authNotifierProvider).user?.id ?? ref.read(storageServiceProvider).getUser()['id'];
       ref.read(documentTtsNotifierProvider.notifier).loadVoices();
-      ref.read(documentTtsNotifierProvider.notifier).loadUserDocuments();
+      ref.read(documentTtsNotifierProvider.notifier).loadUserDocuments(currentUserId);
     });
   }
 
@@ -329,6 +333,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 child: Builder(
                   builder: (context) {
                     final initials = _getUserInitials(user?.name);
+                    final avatarUrl = (user != null && user.avatarUrl != null && (user.avatarUrl as String).isNotEmpty)
+                        ? ApiEndpoints.resolveAvatarUrl(user.avatarUrl as String, ref.watch(apiClientProvider).baseUrl)
+                        : null;
                     return Container(
                       width: 38,
                       height: 38,
@@ -337,20 +344,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
-                      child: initials.isNotEmpty
-                          ? Text(
-                              initials,
-                              style: TextStyle(
-                                color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            )
-                          : Icon(
-                              Icons.person_rounded,
-                              color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
-                              size: 20,
-                            ),
+                      child: ClipOval(
+                        child: avatarUrl != null
+                            ? Image.network(
+                                avatarUrl,
+                                width: 38,
+                                height: 38,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _buildAppBarInitial(initials, isDark),
+                              )
+                            : _buildAppBarInitial(initials, isDark),
+                      ),
                     );
                   },
                 ),
@@ -642,7 +646,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
           const SizedBox(height: 12),
 
-          if (ttsState.userDocuments.isEmpty)
+          if (ttsState.isLoadingDocuments && ttsState.userDocuments.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: context.isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                  ),
+                ),
+              ),
+            )
+          else if (ttsState.userDocuments.isEmpty)
             _buildEmptyDocumentsCard()
           else
             ListView.builder(
@@ -961,6 +979,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
+
+  Widget _buildAppBarInitial(String initials, bool isDark) {
+    return initials.isNotEmpty
+        ? Text(
+            initials,
+            style: TextStyle(
+              color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          )
+        : Icon(
+            Icons.person_rounded,
+            color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B4DFF),
+            size: 20,
+          );
+  }
+
   // TAB 1: PROFILE TAB
   Widget _buildProfileTab(dynamic user, DocumentTtsState ttsState, Map<String, String> stats) {
     final isDark = context.isDark;
@@ -974,7 +1010,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     const double headerHeight = 156.0;
     const double headerCardTopOffset = 126.0;
-    const double avatarDiameter = 84.0;
+    const double avatarDiameter = 92.0;
     final bottomNavPadding = 96.0 + MediaQuery.of(context).padding.bottom;
 
     return SingleChildScrollView(
@@ -1030,7 +1066,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   left: 20.0,
                   right: 20.0,
                 ),
-                padding: const EdgeInsets.fromLTRB(20.0, 54.0, 20.0, 24.0),
+                padding: const EdgeInsets.fromLTRB(20.0, 58.0, 20.0, 24.0),
                 decoration: BoxDecoration(
                   color: context.cardBg,
                   borderRadius: BorderRadius.circular(20.0),
@@ -1049,16 +1085,46 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // User Name
-                    Text(
-                      userName,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: context.textPrimaryColor,
-                        letterSpacing: -0.2,
-                      ),
+                    // User Name with small purple pencil icon immediately to its right
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            userName,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: context.textPrimaryColor,
+                              letterSpacing: -0.3,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              if (user != null && user is UserModel) {
+                                EditNameDialog.show(context, user);
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(16),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4.0),
+                              child: Icon(
+                                Icons.edit_rounded,
+                                color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
 
@@ -1072,29 +1138,33 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                     ),
 
-                    // Account Status Badge (only when authenticated user is present)
+                    // Account Status Badge (pill with green dot and "Account active")
                     if (user != null) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.12),
+                          color: isDark ? const Color(0xFF143825) : const Color(0xFFDCFCE7),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 14),
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF16A34A),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
                             const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                'Readora Account Active',
-                                style: const TextStyle(
-                                  color: AppColors.success,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11,
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                            const Text(
+                              'Account active',
+                              style: TextStyle(
+                                color: Color(0xFF16A34A),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
                               ),
                             ),
                           ],
@@ -1116,12 +1186,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Account',
+                        'Account details',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
-                          letterSpacing: 0.3,
+                          color: isDark ? const Color(0xFFC4B5FD) : context.textPrimaryColor,
+                          letterSpacing: -0.2,
                         ),
                       ),
                     ),
@@ -1147,44 +1217,103 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
               ),
 
-              // 3. Circular Initials Avatar Overlapping Header & Card
+              // 3. Circular Initials / Photo Avatar Overlapping Header & Card
               Positioned(
                 top: headerCardTopOffset - (avatarDiameter / 2),
-                child: Container(
-                  width: avatarDiameter,
-                  height: avatarDiameter,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF5B3FF5),
-                        Color(0xFF8B5CF6),
-                      ],
-                    ),
-                    border: Border.all(
-                      color: isDark ? context.cardBg : Colors.white,
-                      width: 4.0,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF5B3FF5).withOpacity(0.3),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: avatarDiameter,
+                      height: avatarDiameter,
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF2E2452) : const Color(0xFFEDE9FE),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark ? context.cardBg : Colors.white,
+                          width: 4.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF5B3FF5).withOpacity(0.18),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    initials.isNotEmpty ? initials : 'U',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 30,
-                      letterSpacing: -0.5,
+                      alignment: Alignment.center,
+                      child: ClipOval(
+                        child: (user != null && user.avatarUrl != null && (user.avatarUrl as String).isNotEmpty)
+                            ? Image.network(
+                                ApiEndpoints.resolveAvatarUrl(
+                                  user.avatarUrl as String,
+                                  ref.watch(apiClientProvider).baseUrl,
+                                )!,
+                                width: avatarDiameter,
+                                height: avatarDiameter,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Text(
+                                  initials.isNotEmpty ? initials : 'U',
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B3FF5),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 34,
+                                    letterSpacing: -0.5,
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                initials.isNotEmpty ? initials : 'U',
+                                style: TextStyle(
+                                  color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF5B3FF5),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 34,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                      ),
                     ),
-                  ),
+                    // Teal circular camera icon at bottom-right of avatar
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            if (user != null && user is UserModel) {
+                              PhotoOptionsBottomSheet.show(context, user);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0D9488),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark ? context.cardBg : Colors.white,
+                                width: 2.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF0D9488).withValues(alpha: 0.35),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.camera_alt_rounded,
+                              color: Colors.white,
+                              size: 15,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1260,6 +1389,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required String label,
     required String value,
     required bool isDark,
+    Widget? trailing,
+    VoidCallback? onTrailingTap,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1314,6 +1445,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onTrailingTap,
+              child: trailing,
+            ),
+          ],
         ],
       ),
     );
@@ -1578,13 +1716,33 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: Colors.white.withOpacity(0.25),
-                    child: Text(
-                      user?.name.isNotEmpty == true ? user!.name[0].toUpperCase() : 'R',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final drawerAvatarUrl = (user != null && user.avatarUrl != null && (user.avatarUrl as String).isNotEmpty)
+                          ? ApiEndpoints.resolveAvatarUrl(user.avatarUrl as String, ref.watch(apiClientProvider).baseUrl)
+                          : null;
+                      return CircleAvatar(
+                        radius: 24,
+                        backgroundColor: Colors.white.withOpacity(0.25),
+                        child: ClipOval(
+                          child: drawerAvatarUrl != null
+                              ? Image.network(
+                                  drawerAvatarUrl,
+                                  width: 48,
+                                  height: 48,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Text(
+                                    user?.name.isNotEmpty == true ? user!.name[0].toUpperCase() : 'R',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                                  ),
+                                )
+                              : Text(
+                                  user?.name.isNotEmpty == true ? user!.name[0].toUpperCase() : 'R',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                                ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(width: 14),
                   Expanded(

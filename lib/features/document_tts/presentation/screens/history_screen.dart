@@ -180,9 +180,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
             // Filtered Items List
             Expanded(
-              child: filteredDocs.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
+              child: ttsState.isLoadingDocuments && filteredDocs.isEmpty
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                      ),
+                    )
+                  : filteredDocs.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
                       itemCount: filteredDocs.length,
                       itemBuilder: (context, index) {
                         final doc = filteredDocs[index];

@@ -18,6 +18,8 @@ class _MockRepo implements DocumentTtsRepository {
   @override
   Future<List<DocumentModel>> getUserFiles() async => [];
   @override
+  Future<void> deleteFile(String id) async {}
+  @override
   Future<List<VoiceModel>> fetchVoices() async => VoiceModel.defaultVoices();
   @override
   Future<String> translateText(String text, String targetLanguage, {String? sourceLanguage}) async => text;

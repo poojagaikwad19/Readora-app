@@ -36,6 +36,31 @@ class ApiEndpoints {
   static const String register = '/auth/register';
   static const String login = '/auth/login';
   static const String me = '/auth/me';
+  static const String profile = '/auth/profile';
+  static const String avatar = '/auth/avatar';
+  static const String verifyPhone = '/auth/verify-phone';
+  static const String resendPhoneOtp = '/auth/resend-phone-otp';
+  static const String forgotPasswordLookup = '/auth/forgot-password/lookup';
+  static const String forgotPasswordSendOtp = '/auth/forgot-password/send-otp';
+  static const String forgotPasswordVerifyOtp = '/auth/forgot-password/verify-otp';
+  static const String forgotPasswordReset = '/auth/forgot-password/reset';
+
+  /// Resolves relative avatar path (e.g. /uploads/avatars/...) to a full URL using current base URL
+  static String? resolveAvatarUrl(String? avatarPath, String baseUrl) {
+    if (avatarPath == null || avatarPath.isEmpty) return null;
+    if (avatarPath.startsWith('http://') || avatarPath.startsWith('https://')) {
+      return avatarPath;
+    }
+    // Remove '/api' suffix from baseUrl if present
+    String origin = baseUrl;
+    if (origin.endsWith('/api')) {
+      origin = origin.substring(0, origin.length - 4);
+    } else if (origin.endsWith('/api/')) {
+      origin = origin.substring(0, origin.length - 5);
+    }
+    final cleanPath = avatarPath.startsWith('/') ? avatarPath : '/$avatarPath';
+    return '$origin$cleanPath';
+  }
 
   // File & Document Extraction Endpoints
   static const String uploadFile = '/files/upload';

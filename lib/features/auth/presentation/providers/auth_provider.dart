@@ -1,5 +1,8 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http_parser/http_parser.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/services/image_processing_service.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../data/auth_repository.dart';
 import '../../domain/user_model.dart';
@@ -85,13 +88,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String name,
     required String email,
     required String password,
+    String? phoneNumber,
+    String? countryCode,
   }) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null);
     try {
-      await _repository.register(name: name, email: email, password: password);
+      final res = await _repository.register(
+        name: name,
+        email: email,
+        password: password,
+        phoneNumber: phoneNumber,
+        countryCode: countryCode,
+      );
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
-        successMessage: 'Registration successful! Please login with your credentials.',
+        successMessage: res['message'] ?? 'Registration successful! Please login with your credentials.',
       );
       return true;
     } catch (e) {
@@ -106,10 +117,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<bool> login({
     required String email,
     required String password,
+    String? countryCode,
   }) async {
     state = state.copyWith(status: AuthStatus.loading, errorMessage: null, successMessage: null);
     try {
-      final user = await _repository.login(email: email, password: password);
+      final user = await _repository.login(
+        email: email,
+        password: password,
+        countryCode: countryCode,
+      );
       state = state.copyWith(
         status: AuthStatus.authenticated,
         user: user,
@@ -122,6 +138,98 @@ class AuthNotifier extends StateNotifier<AuthState> {
         errorMessage: e.toString(),
       );
       return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> updateProfile({
+    String? name,
+    String? phoneNumber,
+    String? countryCode,
+  }) async {
+    try {
+      final result = await _repository.updateProfile(
+        name: name,
+        phoneNumber: phoneNumber,
+        countryCode: countryCode,
+      );
+      final updatedUser = result['user'] as UserModel;
+      state = state.copyWith(
+        user: updatedUser,
+        successMessage: result['message'] ?? 'Profile updated successfully',
+      );
+      return result;
+    } catch (e) {
+      state = state.copyWith(errorMessage: e.toString());
+      rethrow;
+    }
+  }
+
+  Future<UserModel> uploadAvatar(String rawFilePath) async {
+    try {
+      final processed = await ImageProcessingService.processAvatarImage(rawFilePath);
+      final updatedUser = await _repository.uploadAvatar(
+        processed.path,
+        filename: processed.filename,
+        contentType: MediaType('image', 'jpeg'),
+      );
+
+      // Invalidate Flutter network image cache so updated avatar displays immediately
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      state = state.copyWith(
+        user: updatedUser,
+        successMessage: 'Profile photo updated successfully',
+        errorMessage: null,
+      );
+      return updatedUser;
+    } catch (e) {
+      final message = e is FormatException ? e.message : e.toString();
+      state = state.copyWith(errorMessage: message);
+      rethrow;
+    }
+  }
+
+  Future<UserModel> removeAvatar() async {
+    try {
+      final updatedUser = await _repository.removeAvatar();
+
+      // Invalidate Flutter network image cache so removed avatar reverts to initials immediately
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      state = state.copyWith(
+        user: updatedUser,
+        successMessage: 'Profile photo removed',
+        errorMessage: null,
+      );
+      return updatedUser;
+    } catch (e) {
+      state = state.copyWith(errorMessage: e.toString());
+      rethrow;
+    }
+  }
+
+  Future<UserModel> verifyPhone(String otp) async {
+    try {
+      final updatedUser = await _repository.verifyPhone(otp);
+      state = state.copyWith(
+        user: updatedUser,
+        successMessage: 'Mobile number verified successfully!',
+      );
+      return updatedUser;
+    } catch (e) {
+      state = state.copyWith(errorMessage: e.toString());
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> resendPhoneOtp() async {
+    try {
+      return await _repository.resendPhoneOtp();
+    } catch (e) {
+      state = state.copyWith(errorMessage: e.toString());
+      rethrow;
     }
   }
 

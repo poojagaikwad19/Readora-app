@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import '../config/stt_config.dart';
@@ -28,6 +29,8 @@ class AudioFileSttService {
 
     final fileName = p.basename(filePath);
     final allBaseUrls = <String>[
+      if (successfulBaseUrl != null && successfulBaseUrl!.trim().isNotEmpty)
+        successfulBaseUrl!,
       config.baseUrl,
       ...config.candidateBaseUrls,
     ].where((u) => u.trim().isNotEmpty).toSet().toList();
@@ -39,6 +42,8 @@ class AudioFileSttService {
           ? rawBase.substring(0, rawBase.length - 1)
           : rawBase;
       final uri = Uri.parse('$cleanBaseUrl/api/files/speech-to-text');
+
+      final requestStopwatch = Stopwatch()..start();
 
       try {
         final request = http.MultipartRequest('POST', uri);
@@ -59,18 +64,30 @@ class AudioFileSttService {
           ),
         );
 
+        // Cap candidate timeout to 30s to prevent multi-minute freezes on dead network interfaces
+        final timeoutSec = config.timeoutSeconds.clamp(5, 35);
         final streamedResponse = await _client
             .send(request)
-            .timeout(Duration(seconds: config.timeoutSeconds));
+            .timeout(Duration(seconds: timeoutSec));
         final response = await http.Response.fromStream(streamedResponse);
+        requestStopwatch.stop();
+        final roundtripMs = requestStopwatch.elapsedMilliseconds;
 
         if (response.statusCode == 200 || response.statusCode == 201) {
           final decoded = jsonDecode(response.body);
           if (decoded is Map<String, dynamic>) {
             successfulBaseUrl = cleanBaseUrl;
-            return AudioSttResult.fromJson(decoded);
+            final result = AudioSttResult.fromJson(decoded, roundtripMs: roundtripMs);
+            debugPrint(
+              '⚡ [STT Upload Flow] Success from $cleanBaseUrl: roundtrip=${roundtripMs}ms, '
+              'backendTotal=${result.backendTotalMs}ms, upload=${result.uploadMs}ms, '
+              'queue=${result.queueWaitMs}ms, init=${result.modelInitMs}ms, '
+              'decode=${result.decodingMs}ms, transcribe=${result.transcriptionMs}ms '
+              '[${result.device ?? "CPU"} | ${result.model ?? "default"}]'
+            );
+            return result;
           }
-          lastFailure = AudioSttResult.failure('Unexpected response format from server');
+          lastFailure = AudioSttResult.failure('Unexpected response format from server', roundtripMs: roundtripMs);
         } else {
           String errorMsg = 'Transcription failed with HTTP ${response.statusCode}';
           try {
@@ -79,10 +96,14 @@ class AudioFileSttService {
               errorMsg = errorBody['message'].toString();
             }
           } catch (_) {}
-          lastFailure = AudioSttResult.failure(errorMsg);
+          lastFailure = AudioSttResult.failure(errorMsg, roundtripMs: roundtripMs);
         }
       } catch (e) {
-        lastFailure = AudioSttResult.failure('Failed connecting to $cleanBaseUrl: $e');
+        requestStopwatch.stop();
+        lastFailure = AudioSttResult.failure(
+          'Failed connecting to $cleanBaseUrl: $e',
+          roundtripMs: requestStopwatch.elapsedMilliseconds,
+        );
       }
     }
 

@@ -34,6 +34,8 @@ class _PdfUploadViewState {
   final List<VoiceModel> voices;
   final String selectedVoiceId;
   final PlayerState playerState;
+  final TtsInputSource? _activeTtsTab;
+  TtsInputSource get activeTtsTab => _activeTtsTab ?? TtsInputSource.document;
 
   const _PdfUploadViewState({
     required this.isExtracting,
@@ -46,7 +48,8 @@ class _PdfUploadViewState {
     required this.voices,
     required this.selectedVoiceId,
     required this.playerState,
-  });
+    TtsInputSource? activeTtsTab = TtsInputSource.document,
+  }) : _activeTtsTab = activeTtsTab ?? TtsInputSource.document;
 
   @override
   bool operator ==(Object other) =>
@@ -62,7 +65,8 @@ class _PdfUploadViewState {
           selectedLanguage == other.selectedLanguage &&
           listEquals(voices, other.voices) &&
           selectedVoiceId == other.selectedVoiceId &&
-          playerState == other.playerState;
+          playerState == other.playerState &&
+          activeTtsTab == other.activeTtsTab;
 
   @override
   int get hashCode => Object.hash(
@@ -75,6 +79,7 @@ class _PdfUploadViewState {
         selectedLanguage,
         selectedVoiceId,
         playerState,
+        activeTtsTab,
       );
 }
 
@@ -113,13 +118,25 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final settings = ref.read(settingsProvider);
-      if (widget.mode == UploadMode.tts && _selectedFilePath == null) {
-        final defLang = settings.defaultTtsLanguage;
-        final defVoice = settings.defaultVoiceForLanguage(defLang);
-        ref.read(documentTtsNotifierProvider.notifier).setSelectedLanguage(defLang, voiceId: defVoice);
+      if (widget.mode == UploadMode.tts) {
+        ref.read(documentTtsNotifierProvider.notifier).switchTtsTab(TtsInputSource.document);
+        if (_selectedFilePath == null) {
+          final defLang = settings.defaultTtsLanguage;
+          final defVoice = settings.defaultVoiceForLanguage(defLang);
+          ref.read(documentTtsNotifierProvider.notifier).setSelectedLanguage(defLang, voiceId: defVoice);
+        }
       } else if (widget.mode == UploadMode.stt && _selectedFilePath == null) {
         ref.read(documentTtsNotifierProvider.notifier).setSelectedSttLanguage(settings.defaultSttLanguage);
       }
+    });
+  }
+
+  void _onSelectTtsTab(int index) {
+    if (_ttsInputTypeIndex == index) return;
+    final source = index == 0 ? TtsInputSource.document : TtsInputSource.text;
+    ref.read(documentTtsNotifierProvider.notifier).switchTtsTab(source);
+    setState(() {
+      _ttsInputTypeIndex = index;
     });
   }
 
@@ -273,7 +290,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
         ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
         _uploadAndExtract();
       } else {
-        ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse();
+        ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse(source: TtsInputSource.document);
         _extractTextFromFile(filePath);
       }
     }
@@ -450,8 +467,8 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
   void _removeSelectedFile() {
     _sttRequestSeq++;
     ref.read(documentTtsNotifierProvider.notifier).cancelStt();
-    ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
-    ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse();
+    ref.read(documentTtsNotifierProvider.notifier).stopAudio();
+    ref.read(documentTtsNotifierProvider.notifier).resetTtsResponse(source: TtsInputSource.document);
     setState(() {
       _isExtractingText = false;
       _selectedFilePath = null;
@@ -622,6 +639,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       final response = await ref.read(documentTtsNotifierProvider.notifier).generateSpeech(
             text: text,
             baseUrl: baseUrl,
+            source: TtsInputSource.text,
           );
 
       if (!mounted) return;
@@ -687,47 +705,86 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
         _extractionError = null;
       });
 
-      // Stop any active audio and clear old state before starting transcription
-      await ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
+      try {
+        // Stop any active audio and clear old state before starting transcription
+        await ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
 
-      final thisSeq = ++_sttRequestSeq;
-      // Capture configured language when request starts without altering settings
-      final selectedStt = ref.read(documentTtsNotifierProvider).selectedSttLanguage;
-      final configuredLang = _sourceLanguage ?? selectedStt;
+        final thisSeq = ++_sttRequestSeq;
+        // Capture configured language when request starts without altering settings
+        final selectedStt = ref.read(documentTtsNotifierProvider).selectedSttLanguage;
+        final configuredLang = _sourceLanguage ?? selectedStt;
 
-      final doc = await ref
-          .read(documentTtsNotifierProvider.notifier)
-          .transcribeAudioFile(audioPath, language: configuredLang);
+        final doc = await ref
+            .read(documentTtsNotifierProvider.notifier)
+            .transcribeAudioFile(audioPath, language: configuredLang);
 
-      if (!mounted || thisSeq != _sttRequestSeq) return;
+        if (!mounted || thisSeq != _sttRequestSeq) {
+          if (mounted) {
+            setState(() {
+              _isExtractingText = false;
+            });
+          }
+          return;
+        }
 
-      if (doc != null) {
-        setState(() {
-          _isExtractingText = false;
-          _extractedText = doc.text;
-          _originalExtractedText = doc.text;
-          _sourceLanguage = doc.detectedLanguage;
-          _extractionError = null;
-        });
-        ref.read(documentTtsNotifierProvider.notifier).setSelectedSttLanguage(doc.detectedLanguage);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Transcribed audio ${doc.filename}!'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      } else {
-        final state = ref.read(documentTtsNotifierProvider);
-        setState(() {
-          _isExtractingText = false;
-          _extractionError = state.errorMessage ?? 'Audio transcription failed';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.errorMessage ?? 'File processing failed'),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        if (doc != null && doc.text.trim().isNotEmpty) {
+          setState(() {
+            _isExtractingText = false;
+            _extractedText = doc.text;
+            _originalExtractedText = doc.text;
+            _sourceLanguage = doc.detectedLanguage;
+            _extractionError = null;
+          });
+          ref.read(documentTtsNotifierProvider.notifier).setSelectedSttLanguage(doc.detectedLanguage);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Transcribed audio ${doc.filename}!'),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        } else {
+          final state = ref.read(documentTtsNotifierProvider);
+          final errorMsg = state.errorMessage ?? 'No speech detected in audio file. Tap Retry to try again.';
+          setState(() {
+            _isExtractingText = false;
+            _extractionError = errorMsg;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMsg),
+              backgroundColor: AppColors.error,
+              action: SnackBarAction(
+                label: 'Retry',
+                textColor: Colors.white,
+                onPressed: () => _uploadAndExtract(),
+              ),
+            ),
+          );
+        }
+      } catch (err) {
+        if (mounted) {
+          setState(() {
+            _isExtractingText = false;
+            _extractionError = 'Audio transcription error: $err';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Audio transcription error: $err'),
+              backgroundColor: AppColors.error,
+              action: SnackBarAction(
+                label: 'Retry',
+                textColor: Colors.white,
+                onPressed: () => _uploadAndExtract(),
+              ),
+            ),
+          );
+        }
+      } finally {
+        if (mounted && _isExtractingText) {
+          setState(() {
+            _isExtractingText = false;
+          });
+        }
       }
       return;
     } else {
@@ -751,6 +808,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
       final response = await ref.read(documentTtsNotifierProvider.notifier).generateSpeech(
             text: textToSpeech,
             baseUrl: baseUrl,
+            source: TtsInputSource.document,
           );
 
       if (!mounted) return;
@@ -787,6 +845,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
           voices: s.voices,
           selectedVoiceId: s.selectedVoiceId,
           playerState: s.playerState,
+          activeTtsTab: s.activeTtsTab,
         ),
       ),
     );
@@ -911,7 +970,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
                       label: 'Upload Document',
                       isSelected: _ttsInputTypeIndex == 0,
                       primaryColor: primaryColor,
-                      onTap: () => setState(() => _ttsInputTypeIndex = 0),
+                      onTap: () => _onSelectTtsTab(0),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -920,7 +979,7 @@ class _PdfUploadScreenState extends ConsumerState<PdfUploadScreen> {
                       label: 'Enter Text',
                       isSelected: _ttsInputTypeIndex == 1,
                       primaryColor: primaryColor,
-                      onTap: () => setState(() => _ttsInputTypeIndex = 1),
+                      onTap: () => _onSelectTtsTab(1),
                     ),
                   ),
                 ],

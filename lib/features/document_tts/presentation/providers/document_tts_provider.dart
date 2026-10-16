@@ -26,25 +26,19 @@ final documentTtsRepositoryProvider = Provider<DocumentTtsRepository>((ref) {
   return DocumentTtsRepository(apiClient);
 });
 
-// State Class
-class DocumentTtsState {
-  final bool isExtracting;
-  final bool isGeneratingSpeech;
-  final bool isLoadingVoices;
-  final List<DocumentModel> userDocuments;
-  final DocumentModel? activeDocument;
-  final List<VoiceModel> voices;
-  final String selectedVoiceId;
-  final String selectedLanguage; // english, marathi, hindi for TTS
-  final String selectedSttLanguage; // english, marathi, hindi for STT
-  final TtsResponseModel? currentTtsResponse;
+// Tab Source Enum
+enum TtsInputSource {
+  document,
+  text,
+}
+
+// Per-tab TTS & Playback State
+class TtsTabState {
+  final TtsResponseModel? response;
+  final bool isGenerating;
   final PlayerState playerState;
-  final Duration audioPosition;
-  final Duration audioDuration;
-  final double playbackRate;
-  final bool isMuted;
-  final double volume; // 0.0 to 1.0
-  final bool isDownloadingAudio;
+  final Duration position;
+  final Duration duration;
   final bool isProgressive;
   final int progressiveCurrentChunk;
   final int progressiveTotalChunks;
@@ -52,29 +46,13 @@ class DocumentTtsState {
   final String? completeAudioUrl;
   final String? completeFilename;
   final bool isBufferingNextChunk;
-  final bool isPlayingOriginalAudio;
-  final String? originalAudioPath;
-  final String? errorMessage;
-  final String? successMessage;
 
-  DocumentTtsState({
-    this.isExtracting = false,
-    this.isGeneratingSpeech = false,
-    this.isLoadingVoices = false,
-    this.userDocuments = const [],
-    this.activeDocument,
-    List<VoiceModel>? voices,
-    this.selectedVoiceId = 'CwhRBWXzGAHq8TQ4Fs17',
-    this.selectedLanguage = 'english',
-    this.selectedSttLanguage = 'english',
-    this.currentTtsResponse,
+  const TtsTabState({
+    this.response,
+    this.isGenerating = false,
     this.playerState = PlayerState.stopped,
-    this.audioPosition = Duration.zero,
-    this.audioDuration = Duration.zero,
-    this.playbackRate = 1.0,
-    this.isMuted = false,
-    this.volume = 1.0,
-    this.isDownloadingAudio = false,
+    this.position = Duration.zero,
+    this.duration = Duration.zero,
     this.isProgressive = false,
     this.progressiveCurrentChunk = 1,
     this.progressiveTotalChunks = 1,
@@ -82,16 +60,221 @@ class DocumentTtsState {
     this.completeAudioUrl,
     this.completeFilename,
     this.isBufferingNextChunk = false,
+  });
+
+  TtsTabState copyWith({
+    TtsResponseModel? response,
+    bool clearResponse = false,
+    bool? isGenerating,
+    PlayerState? playerState,
+    Duration? position,
+    Duration? duration,
+    bool? isProgressive,
+    int? progressiveCurrentChunk,
+    int? progressiveTotalChunks,
+    int? progressiveCompletedChunks,
+    String? completeAudioUrl,
+    String? completeFilename,
+    bool? isBufferingNextChunk,
+  }) {
+    return TtsTabState(
+      response: clearResponse ? null : (response ?? this.response),
+      isGenerating: isGenerating ?? this.isGenerating,
+      playerState: playerState ?? this.playerState,
+      position: position ?? this.position,
+      duration: duration ?? this.duration,
+      isProgressive: isProgressive ?? this.isProgressive,
+      progressiveCurrentChunk: progressiveCurrentChunk ?? this.progressiveCurrentChunk,
+      progressiveTotalChunks: progressiveTotalChunks ?? this.progressiveTotalChunks,
+      progressiveCompletedChunks: progressiveCompletedChunks ?? this.progressiveCompletedChunks,
+      completeAudioUrl: completeAudioUrl ?? this.completeAudioUrl,
+      completeFilename: completeFilename ?? this.completeFilename,
+      isBufferingNextChunk: isBufferingNextChunk ?? this.isBufferingNextChunk,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TtsTabState &&
+          runtimeType == other.runtimeType &&
+          response == other.response &&
+          isGenerating == other.isGenerating &&
+          playerState == other.playerState &&
+          position == other.position &&
+          duration == other.duration &&
+          isProgressive == other.isProgressive &&
+          progressiveCurrentChunk == other.progressiveCurrentChunk &&
+          progressiveTotalChunks == other.progressiveTotalChunks &&
+          progressiveCompletedChunks == other.progressiveCompletedChunks &&
+          completeAudioUrl == other.completeAudioUrl &&
+          completeFilename == other.completeFilename &&
+          isBufferingNextChunk == other.isBufferingNextChunk;
+
+  @override
+  int get hashCode => Object.hash(
+        response,
+        isGenerating,
+        playerState,
+        position,
+        duration,
+        isProgressive,
+        progressiveCurrentChunk,
+        progressiveTotalChunks,
+        progressiveCompletedChunks,
+        completeAudioUrl,
+        completeFilename,
+        isBufferingNextChunk,
+      );
+}
+
+// State Class
+class DocumentTtsState {
+  final bool isExtracting;
+  final bool isLoadingVoices;
+  final bool isLoadingDocuments;
+  final List<DocumentModel> userDocuments;
+  final DocumentModel? activeDocument;
+  final List<VoiceModel> voices;
+  final String selectedVoiceId;
+  final String selectedLanguage; // english, marathi, hindi for TTS
+  final String selectedSttLanguage; // english, marathi, hindi for STT
+  final double playbackRate;
+  final bool isMuted;
+  final double volume; // 0.0 to 1.0
+  final bool isDownloadingAudio;
+  final bool isPlayingOriginalAudio;
+  final String? originalAudioPath;
+  final String? errorMessage;
+  final String? successMessage;
+
+  // Independent per-tab state
+  final TtsInputSource? _activeTtsTab;
+  TtsInputSource get activeTtsTab => _activeTtsTab ?? TtsInputSource.document;
+
+  final TtsTabState? _documentTabState;
+  TtsTabState get documentTabState => _documentTabState ?? const TtsTabState();
+
+  final TtsTabState? _textTabState;
+  TtsTabState get textTabState => _textTabState ?? const TtsTabState();
+
+  final TtsInputSource? playingSource;
+
+  DocumentTtsState({
+    this.isExtracting = false,
+    bool? isGeneratingSpeech,
+    this.isLoadingVoices = false,
+    this.isLoadingDocuments = false,
+    this.userDocuments = const [],
+    this.activeDocument,
+    List<VoiceModel>? voices,
+    this.selectedVoiceId = 'CwhRBWXzGAHq8TQ4Fs17',
+    this.selectedLanguage = 'english',
+    this.selectedSttLanguage = 'english',
+    TtsResponseModel? currentTtsResponse,
+    PlayerState? playerState,
+    Duration? audioPosition,
+    Duration? audioDuration,
+    this.playbackRate = 1.0,
+    this.isMuted = false,
+    this.volume = 1.0,
+    this.isDownloadingAudio = false,
+    bool? isProgressive,
+    int? progressiveCurrentChunk,
+    int? progressiveTotalChunks,
+    int? progressiveCompletedChunks,
+    String? completeAudioUrl,
+    String? completeFilename,
+    bool? isBufferingNextChunk,
     this.isPlayingOriginalAudio = false,
     this.originalAudioPath,
     this.errorMessage,
     this.successMessage,
-  }) : voices = voices ?? VoiceModel.defaultVoices();
+    TtsInputSource? activeTtsTab = TtsInputSource.document,
+    TtsTabState? documentTabState,
+    TtsTabState? textTabState,
+    this.playingSource,
+  })  : voices = voices ?? VoiceModel.defaultVoices(),
+        _activeTtsTab = activeTtsTab ?? TtsInputSource.document,
+        _documentTabState = documentTabState ??
+            TtsTabState(
+              response: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? currentTtsResponse : null,
+              isGenerating: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (isGeneratingSpeech ?? false) : false,
+              playerState: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (playerState ?? PlayerState.stopped) : PlayerState.stopped,
+              position: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (audioPosition ?? Duration.zero) : Duration.zero,
+              duration: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (audioDuration ?? Duration.zero) : Duration.zero,
+              isProgressive: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (isProgressive ?? false) : false,
+              progressiveCurrentChunk: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (progressiveCurrentChunk ?? 1) : 1,
+              progressiveTotalChunks: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (progressiveTotalChunks ?? 1) : 1,
+              progressiveCompletedChunks: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (progressiveCompletedChunks ?? 0) : 0,
+              completeAudioUrl: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? completeAudioUrl : null,
+              completeFilename: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? completeFilename : null,
+              isBufferingNextChunk: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.document ? (isBufferingNextChunk ?? false) : false,
+            ),
+        _textTabState = textTabState ??
+            TtsTabState(
+              response: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? currentTtsResponse : null,
+              isGenerating: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (isGeneratingSpeech ?? false) : false,
+              playerState: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (playerState ?? PlayerState.stopped) : PlayerState.stopped,
+              position: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (audioPosition ?? Duration.zero) : Duration.zero,
+              duration: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (audioDuration ?? Duration.zero) : Duration.zero,
+              isProgressive: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (isProgressive ?? false) : false,
+              progressiveCurrentChunk: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (progressiveCurrentChunk ?? 1) : 1,
+              progressiveTotalChunks: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (progressiveTotalChunks ?? 1) : 1,
+              progressiveCompletedChunks: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (progressiveCompletedChunks ?? 0) : 0,
+              completeAudioUrl: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? completeAudioUrl : null,
+              completeFilename: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? completeFilename : null,
+              isBufferingNextChunk: (activeTtsTab ?? TtsInputSource.document) == TtsInputSource.text ? (isBufferingNextChunk ?? false) : false,
+            );
+
+  // Dynamic getters reflecting the active tab
+  TtsResponseModel? get currentTtsResponse =>
+      activeTtsTab == TtsInputSource.text ? textTabState.response : documentTabState.response;
+
+  TtsResponseModel? get documentTtsResponse => documentTabState.response;
+  TtsResponseModel? get textTtsResponse => textTabState.response;
+
+  bool get isGeneratingSpeech =>
+      activeTtsTab == TtsInputSource.text ? textTabState.isGenerating : documentTabState.isGenerating;
+
+  bool get isGeneratingDocumentSpeech => documentTabState.isGenerating;
+  bool get isGeneratingTextSpeech => textTabState.isGenerating;
+
+  PlayerState get playerState =>
+      activeTtsTab == TtsInputSource.text ? textTabState.playerState : documentTabState.playerState;
+
+  Duration get audioPosition =>
+      activeTtsTab == TtsInputSource.text ? textTabState.position : documentTabState.position;
+
+  Duration get audioDuration =>
+      activeTtsTab == TtsInputSource.text ? textTabState.duration : documentTabState.duration;
+
+  bool get isProgressive =>
+      activeTtsTab == TtsInputSource.text ? textTabState.isProgressive : documentTabState.isProgressive;
+
+  int get progressiveCurrentChunk =>
+      activeTtsTab == TtsInputSource.text ? textTabState.progressiveCurrentChunk : documentTabState.progressiveCurrentChunk;
+
+  int get progressiveTotalChunks =>
+      activeTtsTab == TtsInputSource.text ? textTabState.progressiveTotalChunks : documentTabState.progressiveTotalChunks;
+
+  int get progressiveCompletedChunks =>
+      activeTtsTab == TtsInputSource.text ? textTabState.progressiveCompletedChunks : documentTabState.progressiveCompletedChunks;
+
+  String? get completeAudioUrl =>
+      activeTtsTab == TtsInputSource.text ? textTabState.completeAudioUrl : documentTabState.completeAudioUrl;
+
+  String? get completeFilename =>
+      activeTtsTab == TtsInputSource.text ? textTabState.completeFilename : documentTabState.completeFilename;
+
+  bool get isBufferingNextChunk =>
+      activeTtsTab == TtsInputSource.text ? textTabState.isBufferingNextChunk : documentTabState.isBufferingNextChunk;
 
   DocumentTtsState copyWith({
     bool? isExtracting,
     bool? isGeneratingSpeech,
     bool? isLoadingVoices,
+    bool? isLoadingDocuments,
     List<DocumentModel>? userDocuments,
     DocumentModel? activeDocument,
     List<VoiceModel>? voices,
@@ -100,6 +283,7 @@ class DocumentTtsState {
     String? selectedSttLanguage,
     TtsResponseModel? currentTtsResponse,
     bool clearTtsResponse = false,
+    bool clearAllTtsResponses = false,
     PlayerState? playerState,
     Duration? audioPosition,
     Duration? audioDuration,
@@ -119,38 +303,175 @@ class DocumentTtsState {
     bool clearOriginalAudio = false,
     String? errorMessage,
     String? successMessage,
+    TtsInputSource? activeTtsTab,
+    TtsTabState? documentTabState,
+    TtsTabState? textTabState,
+    TtsInputSource? playingSource,
+    bool clearPlayingSource = false,
   }) {
+    final effectiveActiveTab = activeTtsTab ?? this.activeTtsTab;
+
+    TtsTabState newDocTabState = documentTabState ?? this.documentTabState;
+    TtsTabState newTextTabState = textTabState ?? this.textTabState;
+
+    if (clearAllTtsResponses) {
+      newDocTabState = newDocTabState.copyWith(clearResponse: true);
+      newTextTabState = newTextTabState.copyWith(clearResponse: true);
+    } else if (clearTtsResponse) {
+      if (effectiveActiveTab == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(clearResponse: true);
+      } else {
+        newTextTabState = newTextTabState.copyWith(clearResponse: true);
+      }
+    } else if (currentTtsResponse != null) {
+      if (effectiveActiveTab == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(response: currentTtsResponse);
+      } else {
+        newTextTabState = newTextTabState.copyWith(response: currentTtsResponse);
+      }
+    }
+
+    if (isGeneratingSpeech != null) {
+      if (effectiveActiveTab == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(isGenerating: isGeneratingSpeech);
+      } else {
+        newTextTabState = newTextTabState.copyWith(isGenerating: isGeneratingSpeech);
+      }
+    }
+
+    if (playerState != null) {
+      final target = playingSource ?? this.playingSource ?? effectiveActiveTab;
+      if (target == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(playerState: playerState);
+      } else {
+        newTextTabState = newTextTabState.copyWith(playerState: playerState);
+      }
+    }
+
+    if (audioPosition != null) {
+      final target = playingSource ?? this.playingSource ?? effectiveActiveTab;
+      if (target == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(position: audioPosition);
+      } else {
+        newTextTabState = newTextTabState.copyWith(position: audioPosition);
+      }
+    }
+
+    if (audioDuration != null) {
+      final target = playingSource ?? this.playingSource ?? effectiveActiveTab;
+      if (target == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(duration: audioDuration);
+      } else {
+        newTextTabState = newTextTabState.copyWith(duration: audioDuration);
+      }
+    }
+
+    if (isProgressive != null ||
+        progressiveCurrentChunk != null ||
+        progressiveTotalChunks != null ||
+        progressiveCompletedChunks != null ||
+        completeAudioUrl != null ||
+        completeFilename != null ||
+        isBufferingNextChunk != null) {
+      if (effectiveActiveTab == TtsInputSource.document) {
+        newDocTabState = newDocTabState.copyWith(
+          isProgressive: isProgressive,
+          progressiveCurrentChunk: progressiveCurrentChunk,
+          progressiveTotalChunks: progressiveTotalChunks,
+          progressiveCompletedChunks: progressiveCompletedChunks,
+          completeAudioUrl: completeAudioUrl,
+          completeFilename: completeFilename,
+          isBufferingNextChunk: isBufferingNextChunk,
+        );
+      } else {
+        newTextTabState = newTextTabState.copyWith(
+          isProgressive: isProgressive,
+          progressiveCurrentChunk: progressiveCurrentChunk,
+          progressiveTotalChunks: progressiveTotalChunks,
+          progressiveCompletedChunks: progressiveCompletedChunks,
+          completeAudioUrl: completeAudioUrl,
+          completeFilename: completeFilename,
+          isBufferingNextChunk: isBufferingNextChunk,
+        );
+      }
+    }
+
     return DocumentTtsState(
       isExtracting: isExtracting ?? this.isExtracting,
-      isGeneratingSpeech: isGeneratingSpeech ?? this.isGeneratingSpeech,
       isLoadingVoices: isLoadingVoices ?? this.isLoadingVoices,
+      isLoadingDocuments: isLoadingDocuments ?? this.isLoadingDocuments,
       userDocuments: userDocuments ?? this.userDocuments,
       activeDocument: activeDocument ?? this.activeDocument,
       voices: voices ?? this.voices,
       selectedVoiceId: selectedVoiceId ?? this.selectedVoiceId,
       selectedLanguage: selectedLanguage ?? this.selectedLanguage,
       selectedSttLanguage: selectedSttLanguage ?? this.selectedSttLanguage,
-      currentTtsResponse: clearTtsResponse ? null : (currentTtsResponse ?? this.currentTtsResponse),
-      playerState: playerState ?? this.playerState,
-      audioPosition: audioPosition ?? this.audioPosition,
-      audioDuration: audioDuration ?? this.audioDuration,
       playbackRate: playbackRate ?? this.playbackRate,
       isMuted: isMuted ?? this.isMuted,
       volume: volume ?? this.volume,
       isDownloadingAudio: isDownloadingAudio ?? this.isDownloadingAudio,
-      isProgressive: isProgressive ?? this.isProgressive,
-      progressiveCurrentChunk: progressiveCurrentChunk ?? this.progressiveCurrentChunk,
-      progressiveTotalChunks: progressiveTotalChunks ?? this.progressiveTotalChunks,
-      progressiveCompletedChunks: progressiveCompletedChunks ?? this.progressiveCompletedChunks,
-      completeAudioUrl: completeAudioUrl ?? this.completeAudioUrl,
-      completeFilename: completeFilename ?? this.completeFilename,
-      isBufferingNextChunk: isBufferingNextChunk ?? this.isBufferingNextChunk,
       isPlayingOriginalAudio: isPlayingOriginalAudio ?? this.isPlayingOriginalAudio,
       originalAudioPath: clearOriginalAudio ? null : (originalAudioPath ?? this.originalAudioPath),
       errorMessage: errorMessage,
       successMessage: successMessage,
+      activeTtsTab: effectiveActiveTab,
+      documentTabState: newDocTabState,
+      textTabState: newTextTabState,
+      playingSource: clearPlayingSource ? null : (playingSource ?? this.playingSource),
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DocumentTtsState &&
+          runtimeType == other.runtimeType &&
+          isExtracting == other.isExtracting &&
+          isLoadingVoices == other.isLoadingVoices &&
+          isLoadingDocuments == other.isLoadingDocuments &&
+          listEquals(userDocuments, other.userDocuments) &&
+          activeDocument == other.activeDocument &&
+          listEquals(voices, other.voices) &&
+          selectedVoiceId == other.selectedVoiceId &&
+          selectedLanguage == other.selectedLanguage &&
+          selectedSttLanguage == other.selectedSttLanguage &&
+          playbackRate == other.playbackRate &&
+          isMuted == other.isMuted &&
+          volume == other.volume &&
+          isDownloadingAudio == other.isDownloadingAudio &&
+          isPlayingOriginalAudio == other.isPlayingOriginalAudio &&
+          originalAudioPath == other.originalAudioPath &&
+          errorMessage == other.errorMessage &&
+          successMessage == other.successMessage &&
+          activeTtsTab == other.activeTtsTab &&
+          documentTabState == other.documentTabState &&
+          textTabState == other.textTabState &&
+          playingSource == other.playingSource;
+
+  @override
+  int get hashCode => Object.hashAll([
+        isExtracting,
+        isLoadingVoices,
+        isLoadingDocuments,
+        userDocuments,
+        activeDocument,
+        voices,
+        selectedVoiceId,
+        selectedLanguage,
+        selectedSttLanguage,
+        playbackRate,
+        isMuted,
+        volume,
+        isDownloadingAudio,
+        isPlayingOriginalAudio,
+        originalAudioPath,
+        errorMessage,
+        successMessage,
+        activeTtsTab,
+        documentTabState,
+        textTabState,
+        playingSource,
+      ]);
 }
 
 // State Notifier
@@ -159,14 +480,34 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   final StorageService _storageService;
   final Ref? _ref;
   final AudioPlayer _audioPlayer = AudioPlayer();
-  String _activeSessionId = '';
+  final Map<TtsInputSource, String> _tabActiveSessionId = {
+    TtsInputSource.document: '',
+    TtsInputSource.text: '',
+  };
+  final Map<TtsInputSource, int> _tabRequestSeq = {
+    TtsInputSource.document: 0,
+    TtsInputSource.text: 0,
+  };
+  final Map<TtsInputSource, List<TtsResponseModel?>> _tabProgressiveAudioQueue = {
+    TtsInputSource.document: [],
+    TtsInputSource.text: [],
+  };
+  TtsInputSource? _playingSource;
   String _lastBaseUrl = '';
-  List<TtsResponseModel?> _progressiveAudioQueue = [];
   final Set<String> _pendingDeletions = {};
   int _activeSttToken = 0;
   readora_stt.AudioFileSttService? _currentSttService;
 
+  String? _activeUserId;
+  int _sessionGeneration = 0;
+
+  String get _activeSessionId => _tabActiveSessionId[state.activeTtsTab] ?? '';
+  String? get activeUserId => _activeUserId;
+  String get _currentUserId => _activeUserId ?? _storageService.getUser()['id'] ?? 'guest';
+
   DocumentTtsNotifier(this._repository, this._storageService, [this._ref]) : super(DocumentTtsState()) {
+    _storageService.migrateLegacyHistoryDocsIfApplicable();
+    _activeUserId = _storageService.getUser()['id'];
     _initAudioPlayer();
     _loadInitialLocalHistory();
     _applyInitialSettings();
@@ -175,6 +516,20 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         stopAudioAndClearQueue();
         stopOriginalAudio();
       };
+
+      // Listen for authenticated user changes to enforce strict cross-account isolation
+      _ref!.listen<AuthState>(authNotifierProvider, (previous, next) {
+        final prevUserId = previous?.user?.id;
+        final nextUserId = next.user?.id;
+        if (prevUserId != nextUserId) {
+          if (nextUserId == null) {
+            clearUserData();
+          } else {
+            switchUser(nextUserId);
+          }
+        }
+      });
+
       _ref!.listen<SettingsModel>(settingsProvider, (previous, next) {
         if (previous == null) {
           final defVoice = next.defaultVoiceForLanguage(next.defaultTtsLanguage);
@@ -255,28 +610,86 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
 
   void _loadInitialLocalHistory() {
     try {
-      final localRaw = _storageService.getHistoryDocs();
-      final localDocs = localRaw.map((e) => DocumentModel.fromJson(e)).toList();
-      _updateAndPersistDocuments(localDocs);
+      final effectiveUserId = _activeUserId ?? _storageService.getUser()['id'] ?? 'guest';
+      final excludedIds = _storageService.getExcludedHistoryIds(effectiveUserId);
+      final localRaw = _storageService.getHistoryDocs(effectiveUserId);
+      final localDocs = localRaw
+          .map((e) => DocumentModel.fromJson(e))
+          .where((d) => !excludedIds.contains(d.docId))
+          .toList();
+      _updateAndPersistDocuments(localDocs, effectiveUserId);
     } catch (_) {}
   }
 
   void _initAudioPlayer() {
-    _audioPlayer.onPlayerStateChanged.listen((state) {
-      if (mounted) {
-        this.state = this.state.copyWith(playerState: state);
+    _audioPlayer.onPlayerStateChanged.listen((pState) {
+      if (!mounted) return;
+      if (state.isPlayingOriginalAudio) {
+        state = state.copyWith(playerState: pState);
+        return;
+      }
+
+      final source = _playingSource;
+      if (source == null) {
+        if (pState == PlayerState.stopped) {
+          state = state.copyWith(
+            documentTabState: state.documentTabState.copyWith(playerState: PlayerState.stopped),
+            textTabState: state.textTabState.copyWith(playerState: PlayerState.stopped),
+          );
+        }
+        return;
+      }
+
+      if (source == TtsInputSource.document) {
+        state = state.copyWith(
+          documentTabState: state.documentTabState.copyWith(playerState: pState),
+        );
+      } else {
+        state = state.copyWith(
+          textTabState: state.textTabState.copyWith(playerState: pState),
+        );
       }
     });
 
     _audioPlayer.onPositionChanged.listen((pos) {
-      if (mounted) {
-        this.state = this.state.copyWith(audioPosition: pos);
+      if (!mounted) return;
+      if (state.isPlayingOriginalAudio) {
+        state = state.copyWith(audioPosition: pos);
+        return;
+      }
+
+      final source = _playingSource;
+      if (source == null) return;
+
+      if (source == TtsInputSource.document) {
+        state = state.copyWith(
+          documentTabState: state.documentTabState.copyWith(position: pos),
+        );
+      } else {
+        state = state.copyWith(
+          textTabState: state.textTabState.copyWith(position: pos),
+        );
       }
     });
 
     _audioPlayer.onDurationChanged.listen((dur) {
-      if (mounted) {
-        this.state = this.state.copyWith(audioDuration: dur);
+      if (!mounted) return;
+      if (state.isPlayingOriginalAudio) {
+        state = state.copyWith(audioDuration: dur);
+        return;
+      }
+
+      final source = _playingSource;
+      if (source == null) return;
+
+      if (source == TtsInputSource.document) {
+        state = state.copyWith(
+          documentTabState: state.documentTabState.copyWith(duration: dur),
+        );
+      } else {
+        state = state.copyWith(
+          textTabState: state.textTabState.copyWith(duration: dur),
+        );
       }
     });
 
@@ -292,73 +705,157 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         return;
       }
 
+      final source = _playingSource;
+      if (source == null) return;
+
+      final tabState = source == TtsInputSource.document
+          ? state.documentTabState
+          : state.textTabState;
+
+      final sessionId = _tabActiveSessionId[source] ?? '';
+
       // Guard: If session was invalidated or player was stopped, do NOT advance or restart playback
-      if (_activeSessionId.isEmpty || state.playerState == PlayerState.stopped) {
-        state = state.copyWith(
+      if (sessionId.isEmpty || tabState.playerState == PlayerState.stopped) {
+        final doneTab = tabState.copyWith(
           playerState: PlayerState.completed,
-          audioPosition: Duration.zero,
+          position: Duration.zero,
           isBufferingNextChunk: false,
+        );
+        state = state.copyWith(
+          documentTabState: source == TtsInputSource.document ? doneTab : null,
+          textTabState: source == TtsInputSource.text ? doneTab : null,
         );
         return;
       }
 
-      if (state.isProgressive && state.progressiveCurrentChunk < state.progressiveTotalChunks) {
-        final nextIndex = state.progressiveCurrentChunk; // 0-based index of next chunk
+      if (tabState.isProgressive && tabState.progressiveCurrentChunk < tabState.progressiveTotalChunks) {
+        final nextIndex = tabState.progressiveCurrentChunk; // 0-based index of next chunk
         final nextChunkNumber = nextIndex + 1; // 1-based chunk number
+        final queue = _tabProgressiveAudioQueue[source] ?? [];
 
-        if (_progressiveAudioQueue.length > nextIndex && _progressiveAudioQueue[nextIndex] != null) {
-          final nextChunk = _progressiveAudioQueue[nextIndex]!;
-          final wasPaused = (state.playerState == PlayerState.paused);
+        if (queue.length > nextIndex && queue[nextIndex] != null) {
+          final nextChunk = queue[nextIndex]!;
+          final wasPaused = (tabState.playerState == PlayerState.paused);
 
-          state = state.copyWith(
+          final advTab = tabState.copyWith(
             progressiveCurrentChunk: nextChunkNumber,
-            currentTtsResponse: nextChunk,
-            audioPosition: Duration.zero,
+            response: nextChunk,
+            position: Duration.zero,
             isBufferingNextChunk: false,
           );
 
-          if (!wasPaused && _activeSessionId.isNotEmpty && state.playerState != PlayerState.stopped) {
-            await playAudio(nextChunk.audioUrl, _lastBaseUrl);
+          state = state.copyWith(
+            documentTabState: source == TtsInputSource.document ? advTab : null,
+            textTabState: source == TtsInputSource.text ? advTab : null,
+          );
+
+          if (!wasPaused && sessionId.isNotEmpty && tabState.playerState != PlayerState.stopped) {
+            await playAudio(nextChunk.audioUrl, _lastBaseUrl, source: source);
           }
           return;
         } else {
           // Next chunk is still buffering in the background
-          state = state.copyWith(
+          final bufferTab = tabState.copyWith(
             progressiveCurrentChunk: nextChunkNumber,
             isBufferingNextChunk: true,
             playerState: PlayerState.completed,
+          );
+          state = state.copyWith(
+            documentTabState: source == TtsInputSource.document ? bufferTab : null,
+            textTabState: source == TtsInputSource.text ? bufferTab : null,
           );
           return;
         }
       }
 
-      state = state.copyWith(
+      final completedTab = tabState.copyWith(
         playerState: PlayerState.completed,
-        audioPosition: Duration.zero,
+        position: Duration.zero,
         isBufferingNextChunk: false,
+      );
+      state = state.copyWith(
+        documentTabState: source == TtsInputSource.document ? completedTab : null,
+        textTabState: source == TtsInputSource.text ? completedTab : null,
       );
     });
   }
 
-  void _invalidateActiveSession() {
-    _activeSessionId = '';
-    _progressiveAudioQueue = [];
+  void _invalidateActiveSession([TtsInputSource? source]) {
+    if (source != null) {
+      _tabActiveSessionId[source] = '';
+      _tabProgressiveAudioQueue[source] = [];
+    } else {
+      _tabActiveSessionId[TtsInputSource.document] = '';
+      _tabActiveSessionId[TtsInputSource.text] = '';
+      _tabProgressiveAudioQueue[TtsInputSource.document] = [];
+      _tabProgressiveAudioQueue[TtsInputSource.text] = [];
+    }
+    _playingSource = null;
     _audioPlayer.stop();
   }
 
-  /// Stops audio playback immediately and clears progressive queue.
-  Future<void> stopAudio() async {
-    _invalidateActiveSession();
-    await _audioPlayer.stop();
+  /// Switches active TTS tab between Upload Document and Enter Text,
+  /// immediately stopping any in-progress playback without auto-playing destination audio.
+  Future<void> switchTtsTab(TtsInputSource newTab) async {
+    if (state.activeTtsTab == newTab) return;
+
+    _playingSource = null;
     state = state.copyWith(
-      playerState: PlayerState.stopped,
-      audioPosition: Duration.zero,
+      activeTtsTab: newTab,
+      documentTabState: state.documentTabState.copyWith(
+        playerState: PlayerState.stopped,
+      ),
+      textTabState: state.textTabState.copyWith(
+        playerState: PlayerState.stopped,
+      ),
+      clearPlayingSource: true,
       isPlayingOriginalAudio: false,
+    );
+
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+  }
+
+  @visibleForTesting
+  void setPlayerStateForTesting(PlayerState pState, {TtsInputSource? source}) {
+    final target = source ?? state.activeTtsTab;
+    if (pState == PlayerState.playing) {
+      _playingSource = target;
+    } else if (pState == PlayerState.stopped && _playingSource == target) {
+      _playingSource = null;
+    }
+    state = state.copyWith(
+      documentTabState: target == TtsInputSource.document
+          ? state.documentTabState.copyWith(playerState: pState)
+          : null,
+      textTabState: target == TtsInputSource.text
+          ? state.textTabState.copyWith(playerState: pState)
+          : null,
+    );
+  }
+
+  /// Stops audio playback immediately and clears progressive queue for the active tab.
+  Future<void> stopAudio() async {
+    _playingSource = null;
+    await _audioPlayer.stop();
+    final stoppedTab = (state.activeTtsTab == TtsInputSource.document
+            ? state.documentTabState
+            : state.textTabState)
+        .copyWith(
+      playerState: PlayerState.stopped,
+      position: Duration.zero,
       isProgressive: false,
       progressiveCurrentChunk: 1,
       progressiveTotalChunks: 1,
       progressiveCompletedChunks: 0,
       isBufferingNextChunk: false,
+    );
+    state = state.copyWith(
+      documentTabState: state.activeTtsTab == TtsInputSource.document ? stoppedTab : null,
+      textTabState: state.activeTtsTab == TtsInputSource.text ? stoppedTab : null,
+      isPlayingOriginalAudio: false,
+      clearPlayingSource: true,
     );
   }
 
@@ -376,7 +873,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     );
   }
 
-  /// Stops audio playback immediately, invalidates active sessions, and wipes current TTS response.
+  /// Stops audio playback immediately, invalidates active sessions, and wipes all TTS responses.
   Future<void> stopAudioAndClearQueue() async {
     _activeSttToken++;
     try {
@@ -384,26 +881,106 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     } catch (_) {}
     _currentSttService = null;
     _invalidateActiveSession();
-    await _audioPlayer.stop();
+    _playingSource = null;
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
     state = state.copyWith(
-      clearTtsResponse: true,
-      playerState: PlayerState.stopped,
+      clearAllTtsResponses: true,
+      documentTabState: const TtsTabState(),
+      textTabState: const TtsTabState(),
+      clearPlayingSource: true,
       isPlayingOriginalAudio: false,
-      audioPosition: Duration.zero,
-      audioDuration: Duration.zero,
-      isProgressive: false,
-      progressiveCurrentChunk: 1,
-      progressiveTotalChunks: 1,
-      progressiveCompletedChunks: 0,
-      completeAudioUrl: null,
-      completeFilename: null,
-      isBufferingNextChunk: false,
     );
   }
 
+  /// Completely clears the previous account's in-memory history, dashboard items, transcripts,
+  /// selected files, and playback state on logout or account teardown.
+  Future<void> clearUserData() async {
+    _sessionGeneration++;
+    _activeSttToken++;
+    try {
+      _currentSttService?.dispose();
+    } catch (_) {}
+    _currentSttService = null;
+    _invalidateActiveSession();
+    _playingSource = null;
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+
+    _activeUserId = null;
+    state = DocumentTtsState(
+      isLoadingVoices: false,
+      isLoadingDocuments: false,
+      isExtracting: false,
+      userDocuments: const [],
+      activeDocument: null,
+      originalAudioPath: null,
+      isPlayingOriginalAudio: false,
+      documentTabState: const TtsTabState(),
+      textTabState: const TtsTabState(),
+      playingSource: null,
+    );
+  }
+
+  /// Explicitly switches active user context, stops previous playback, cancels in-flight operations,
+  /// isolates local cached documents, and fetches the new user's remote records.
+  Future<void> switchUser(String? newUserId) async {
+    final currentGen = ++_sessionGeneration;
+    _activeSttToken++;
+    try {
+      _currentSttService?.dispose();
+    } catch (_) {}
+    _currentSttService = null;
+    _invalidateActiveSession();
+    _playingSource = null;
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+
+    _activeUserId = newUserId;
+
+    if (newUserId == null || newUserId.isEmpty) {
+      await clearUserData();
+      return;
+    }
+
+    // 1. Immediately scope to the new user's persistent local cache (never show old user's data)
+    final localRaw = _storageService.getHistoryDocs(newUserId);
+    final excludedIds = _storageService.getExcludedHistoryIds(newUserId);
+    final localDocs = localRaw
+        .map((e) => DocumentModel.fromJson(e))
+        .where((d) => !excludedIds.contains(d.docId))
+        .toList();
+
+    state = DocumentTtsState(
+      isLoadingVoices: false,
+      isLoadingDocuments: true,
+      isExtracting: false,
+      userDocuments: localDocs,
+      activeDocument: null,
+      originalAudioPath: null,
+      isPlayingOriginalAudio: false,
+      documentTabState: const TtsTabState(),
+      textTabState: const TtsTabState(),
+      playingSource: null,
+    );
+
+    // 2. Fetch authenticated user's remote records
+    await loadUserDocuments(newUserId, currentGen);
+  }
+
   @visibleForTesting
-  void setTtsResponseForTesting(TtsResponseModel? response) {
-    state = state.copyWith(currentTtsResponse: response);
+  void setTtsResponseForTesting(TtsResponseModel? response, {TtsInputSource source = TtsInputSource.document}) {
+    final updatedTab = (source == TtsInputSource.document
+            ? state.documentTabState
+            : state.textTabState)
+        .copyWith(response: response);
+    state = state.copyWith(
+      documentTabState: source == TtsInputSource.document ? updatedTab : null,
+      textTabState: source == TtsInputSource.text ? updatedTab : null,
+    );
   }
 
   @override
@@ -424,21 +1001,11 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     }
 
     if (clean != state.selectedLanguage || effectiveVoice != state.selectedVoiceId) {
-      _invalidateActiveSession();
+      _invalidateActiveSession(state.activeTtsTab);
       state = state.copyWith(
         selectedLanguage: clean,
         selectedVoiceId: effectiveVoice,
         clearTtsResponse: true,
-        playerState: PlayerState.stopped,
-        audioPosition: Duration.zero,
-        audioDuration: Duration.zero,
-        isProgressive: false,
-        progressiveCurrentChunk: 1,
-        progressiveTotalChunks: 1,
-        progressiveCompletedChunks: 0,
-        completeAudioUrl: null,
-        completeFilename: null,
-        isBufferingNextChunk: false,
       );
     }
   }
@@ -452,41 +1019,21 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
 
   void setSelectedVoice(String voiceId) {
     if (voiceId != state.selectedVoiceId) {
-      _invalidateActiveSession();
+      _invalidateActiveSession(state.activeTtsTab);
       state = state.copyWith(
         selectedVoiceId: voiceId,
         clearTtsResponse: true,
-        playerState: PlayerState.stopped,
-        audioPosition: Duration.zero,
-        audioDuration: Duration.zero,
-        isProgressive: false,
-        progressiveCurrentChunk: 1,
-        progressiveTotalChunks: 1,
-        progressiveCompletedChunks: 0,
-        completeAudioUrl: null,
-        completeFilename: null,
-        isBufferingNextChunk: false,
       );
     }
   }
 
   void setActiveDocument(DocumentModel doc) {
     if (doc.docId != state.activeDocument?.docId) {
-      _invalidateActiveSession();
+      _invalidateActiveSession(TtsInputSource.document);
       state = state.copyWith(
         activeDocument: doc,
         selectedLanguage: doc.detectedLanguage,
-        clearTtsResponse: true,
-        playerState: PlayerState.stopped,
-        audioPosition: Duration.zero,
-        audioDuration: Duration.zero,
-        isProgressive: false,
-        progressiveCurrentChunk: 1,
-        progressiveTotalChunks: 1,
-        progressiveCompletedChunks: 0,
-        completeAudioUrl: null,
-        completeFilename: null,
-        isBufferingNextChunk: false,
+        documentTabState: const TtsTabState(),
         originalAudioPath: doc.audioSourcePath,
         clearOriginalAudio: doc.audioSourcePath == null,
         isPlayingOriginalAudio: false,
@@ -511,8 +1058,9 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   }
 
   /// Auto-deletes history items older than 30 days, filters excluded IDs, deduplicates, sorts by date, updates state & persists to storage.
-  void _updateAndPersistDocuments(List<DocumentModel> docs) {
-    final excludedIds = _storageService.getExcludedHistoryIds();
+  void _updateAndPersistDocuments(List<DocumentModel> docs, [String? explicitUserId]) {
+    final effectiveUserId = explicitUserId ?? _activeUserId ?? _storageService.getUser()['id'] ?? 'guest';
+    final excludedIds = _storageService.getExcludedHistoryIds(effectiveUserId);
     final cutoffDate = DateTime.now().subtract(const Duration(days: 30));
     final validDocs = docs.where((doc) {
       if (excludedIds.contains(doc.docId)) return false;
@@ -560,7 +1108,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
 
     try {
       final docsJson = finalList.map((d) => d.toJson()).toList();
-      _storageService.saveHistoryDocs(docsJson);
+      _storageService.saveHistoryDocs(docsJson, effectiveUserId);
     } catch (_) {}
   }
 
@@ -612,10 +1160,16 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     }
   }
 
-  Future<void> loadUserDocuments() async {
+  Future<void> loadUserDocuments([String? explicitUserId, int? generationToken]) async {
+    final targetGen = generationToken ?? _sessionGeneration;
+    final effectiveUserId = explicitUserId ?? _activeUserId ?? _storageService.getUser()['id'] ?? 'guest';
+    _activeUserId = effectiveUserId;
+
+    state = state.copyWith(isLoadingDocuments: true);
+
     try {
-      final excludedIds = _storageService.getExcludedHistoryIds();
-      final localRaw = _storageService.getHistoryDocs();
+      final excludedIds = _storageService.getExcludedHistoryIds(effectiveUserId);
+      final localRaw = _storageService.getHistoryDocs(effectiveUserId);
       final localDocs = localRaw
           .map((e) => DocumentModel.fromJson(e))
           .where((d) => !excludedIds.contains(d.docId))
@@ -628,16 +1182,27 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
             .toList();
       } catch (_) {}
 
-      final combined = <DocumentModel>[...localDocs, ...remoteDocs, ...state.userDocuments];
-      _updateAndPersistDocuments(combined);
-    } catch (_) {}
+      // Guard: Ignore late responses from a previous session or if user changed
+      if (_sessionGeneration != targetGen || _activeUserId != effectiveUserId) {
+        return;
+      }
+
+      // Combine ONLY authenticated user's local docs and remote docs (NEVER old in-memory state.userDocuments)
+      final combined = <DocumentModel>[...localDocs, ...remoteDocs];
+      _updateAndPersistDocuments(combined, effectiveUserId);
+    } finally {
+      if (_sessionGeneration == targetGen && _activeUserId == effectiveUserId) {
+        state = state.copyWith(isLoadingDocuments: false);
+      }
+    }
   }
 
-  /// Delete document from history with optimistic removal, account-scoped persistence, and failure rollback.
+  /// Delete document from history with optimistic removal, account-scoped persistence, and backend synchronization.
   Future<bool> deleteDocument(String docId) async {
     if (docId.isEmpty || _pendingDeletions.contains(docId)) return false;
     _pendingDeletions.add(docId);
 
+    final effectiveUserId = _activeUserId ?? _storageService.getUser()['id'] ?? 'guest';
     final docIndex = state.userDocuments.indexWhere((d) => d.docId == docId);
     if (docIndex == -1) {
       _pendingDeletions.remove(docId);
@@ -667,13 +1232,22 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
 
     try {
       // Persist account-scoped exclusion and updated history
-      await _storageService.addExcludedHistoryId(docId);
+      await _storageService.addExcludedHistoryId(docId, effectiveUserId);
       final docsJson = updatedList.map((d) => d.toJson()).toList();
-      await _storageService.saveHistoryDocs(docsJson);
+      await _storageService.saveHistoryDocs(docsJson, effectiveUserId);
+
+      // Enforce remote deletion from backend if doc has a backend ID
+      if (!docId.startsWith('doc_') && !docId.startsWith('stt_')) {
+        try {
+          await _repository.deleteFile(docId);
+        } catch (backendErr) {
+          debugPrint('[Delete] Remote backend delete info: $backendErr');
+        }
+      }
       return true;
     } catch (e) {
       // Persistence failed: rollback optimistic removal
-      await _storageService.removeExcludedHistoryId(docId);
+      await _storageService.removeExcludedHistoryId(docId, effectiveUserId);
       final rollbackList = List<DocumentModel>.from(state.userDocuments);
       if (docIndex <= rollbackList.length) {
         rollbackList.insert(docIndex, docToDelete);
@@ -691,9 +1265,17 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   }
 
   Future<DocumentModel?> extractDocument(String filePath) async {
+    final gen = _sessionGeneration;
+    final reqUserId = _currentUserId;
     state = state.copyWith(isExtracting: true, errorMessage: null, successMessage: null);
     try {
       final rawDoc = await _repository.extractDocument(filePath);
+
+      // Guard against stale response if user switched
+      if (_sessionGeneration != gen || _currentUserId != reqUserId) {
+        return null;
+      }
+
       final doc = DocumentModel(
         docId: rawDoc.docId.isNotEmpty ? rawDoc.docId : 'doc_${DateTime.now().millisecondsSinceEpoch}',
         filename: rawDoc.filename,
@@ -712,7 +1294,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       );
 
       final updatedDocs = [doc, ...state.userDocuments];
-      _updateAndPersistDocuments(updatedDocs);
+      _updateAndPersistDocuments(updatedDocs, reqUserId);
       state = state.copyWith(
         isExtracting: false,
         activeDocument: doc,
@@ -721,6 +1303,9 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       );
       return doc;
     } catch (e) {
+      if (_sessionGeneration != gen || _currentUserId != reqUserId) {
+        return null;
+      }
       state = state.copyWith(
         isExtracting: false,
         errorMessage: e.toString(),
@@ -735,6 +1320,8 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     String? language,
   }) async {
     final int requestToken = ++_activeSttToken;
+    final int requestSessionGen = _sessionGeneration;
+    final String requestUserId = _currentUserId;
 
     // 1. Immediately invalidate any active TTS session and stop lingering audio
     _invalidateActiveSession();
@@ -763,11 +1350,11 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     );
 
     try {
-      // 2. Retain a usable local source file in app storage for original audio playback
+      // 2. Retain a usable local source file in user-scoped app storage for original audio playback
       String persistentAudioPath = filePath;
       try {
         final appDir = await getApplicationDocumentsDirectory();
-        final audioDir = Directory('${appDir.path}/stt_audio');
+        final audioDir = Directory('${appDir.path}/users/$requestUserId/stt_audio');
         if (!await audioDir.exists()) {
           await audioDir.create(recursive: true);
         }
@@ -783,7 +1370,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         debugPrint('Failed to copy audio to app storage: $e');
       }
 
-      if (requestToken != _activeSttToken) return null;
+      if (requestToken != _activeSttToken || _sessionGeneration != requestSessionGen || _currentUserId != requestUserId) return null;
 
       String transcript = '';
       List<TimedWord> timedWords = [];
@@ -801,7 +1388,7 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       // 1. Attempt fast backend transcription first (completes in 1-3 seconds on host server)
       readora_stt.AudioFileSttService? sttService;
       try {
-        final token = await _storageService.getToken() ?? '';
+        final token = _storageService.getToken() ?? '';
         final saved = _storageService.getBaseUrl();
         final clientUrl = _ref?.read(apiClientProvider).baseUrl ?? '';
 
@@ -829,23 +1416,40 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
           jwtToken: token,
         );
 
-        if (pkgResult.success && pkgResult.transcript.isNotEmpty) {
-          transcript = pkgResult.transcript;
-          timedWords = pkgResult.timedWords.map((w) => TimedWord(
-            text: w.word,
-            startMs: w.startMs,
-            endMs: w.endMs,
-          )).toList();
+        if (pkgResult.success) {
           pkgSucceeded = true;
           if (sttService.successfulBaseUrl != null) {
             final activeApiUrl = '${sttService.successfulBaseUrl}/api';
             _storageService.saveBaseUrl(activeApiUrl);
             _ref?.read(apiClientProvider).updateBaseUrl(activeApiUrl);
           }
+
+          if (pkgResult.transcript.trim().isEmpty) {
+            // Handled empty audio / no speech detected cleanly without redundant fallbacks
+            if (requestToken == _activeSttToken && _sessionGeneration == requestSessionGen && _currentUserId == requestUserId) {
+              state = state.copyWith(
+                isExtracting: false,
+                activeDocument: previousDoc,
+                originalAudioPath: previousAudioPath,
+                audioDuration: previousAudioDuration,
+                clearTtsResponse: true,
+                errorMessage: 'No speech was detected in this recording. Please speak clearly and try again.',
+              );
+            }
+            return null;
+          }
+
+          transcript = pkgResult.transcript;
+          timedWords = pkgResult.timedWords.map((w) => TimedWord(
+            text: w.word,
+            startMs: w.startMs,
+            endMs: w.endMs,
+          )).toList();
+
           debugPrint('⚡ [STT] High-speed server transcription completed: ${transcript.length} chars');
         }
       } catch (pkgErr) {
-        debugPrint('[readora_audio_stt] Server transcription fallback: $pkgErr');
+        debugPrint('[readora_audio_stt] Server transcription error: $pkgErr');
       } finally {
         if (_currentSttService == sttService) {
           _currentSttService = null;
@@ -853,16 +1457,19 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         sttService?.dispose();
       }
 
-      if (requestToken != _activeSttToken) return null;
+      if (requestToken != _activeSttToken || _sessionGeneration != requestSessionGen || _currentUserId != requestUserId) {
+        state = state.copyWith(isExtracting: false);
+        return null;
+      }
 
-      // 2. If server was unreachable, run optimized on-device Whisper (base model)
+      // 2. If server was offline or failed, run optimized on-device Whisper (base model) or repo detailed fallback
       if (!pkgSucceeded) {
         final langParam = sttLang == readora_stt.SttLanguage.marathi
             ? 'mr'
             : (sttLang == readora_stt.SttLanguage.hindi
                 ? 'hi'
                 : (sttLang == readora_stt.SttLanguage.auto ? 'auto' : 'en'));
-        debugPrint('📱 [STT] Running local optimized Whisper ($langParam)...');
+        debugPrint('📱 [STT] Attempting on-device Whisper or repository detailed fallback ($langParam)...');
         try {
           final res = await LocalWhisperService().transcribeAudioDetailed(
             filePath,
@@ -870,22 +1477,45 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
           );
           transcript = res.text;
           timedWords = res.words;
+          if (transcript.isNotEmpty) pkgSucceeded = true;
         } catch (localErr) {
-          debugPrint('📱 [STT] Local whisper fallback error: $localErr, attempting backend repo detailed...');
-          final res = await _repository.transcribeAudioBackendDetailed(
-            filePath,
-            language: langParam == 'auto' ? 'mr' : langParam,
-          );
-          transcript = (res['transcript'] ?? res['text'] ?? '').toString();
-          if (res['words'] is List) {
-            timedWords = (res['words'] as List)
-                .map((w) => TimedWord.fromJson(Map<String, dynamic>.from(w as Map)))
-                .toList();
+          debugPrint('📱 [STT] Local whisper fallback error: $localErr, attempting repo detailed fallback...');
+          try {
+            final res = await _repository.transcribeAudioBackendDetailed(
+              filePath,
+              language: langParam == 'auto' ? 'mr' : langParam,
+            );
+            transcript = (res['transcript'] ?? res['text'] ?? '').toString();
+            if (res['words'] is List) {
+              timedWords = (res['words'] as List)
+                  .map((w) => TimedWord.fromJson(Map<String, dynamic>.from(w as Map)))
+                  .toList();
+            }
+            if (transcript.isNotEmpty) pkgSucceeded = true;
+          } catch (repoErr) {
+            debugPrint('📱 [STT] Repository detailed fallback error: $repoErr');
           }
+        }
+
+        if (!pkgSucceeded && transcript.isEmpty) {
+          if (requestToken == _activeSttToken && _sessionGeneration == requestSessionGen && _currentUserId == requestUserId) {
+            state = state.copyWith(
+              isExtracting: false,
+              activeDocument: previousDoc,
+              originalAudioPath: previousAudioPath,
+              audioDuration: previousAudioDuration,
+              clearTtsResponse: true,
+              errorMessage: 'Could not transcribe audio. Please check your network and tap Retry.',
+            );
+          }
+          return null;
         }
       }
 
-      if (requestToken != _activeSttToken) return null;
+      if (requestToken != _activeSttToken || _sessionGeneration != requestSessionGen || _currentUserId != requestUserId) {
+        state = state.copyWith(isExtracting: false);
+        return null;
+      }
 
       // 3. Probe real duration from the media player without guessing
       Duration probedDuration = Duration.zero;
@@ -902,7 +1532,10 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         debugPrint('Could not probe audio duration: $e');
       }
 
-      if (requestToken != _activeSttToken) return null;
+      if (requestToken != _activeSttToken || _sessionGeneration != requestSessionGen || _currentUserId != requestUserId) {
+        state = state.copyWith(isExtracting: false);
+        return null;
+      }
 
       final filename = filePath.split(RegExp(r'[/\\]')).last;
       final ext = filename.contains('.') ? filename.split('.').last.toLowerCase() : 'audio';
@@ -910,7 +1543,6 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       // Smart detected language resolution: preserve Devanagari script integrity
       String resolvedDocLang = effectiveLang;
       if (RegExp(r'[\u0900-\u097F]').hasMatch(transcript)) {
-        // Contains Devanagari characters -> ensure detectedLanguage is marathi or hindi, never english
         resolvedDocLang = (effectiveLang == 'marathi' || effectiveLang == 'mr' || filename.toLowerCase().contains('marathi'))
             ? 'marathi'
             : 'hindi';
@@ -931,8 +1563,9 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         audioSourcePath: persistentAudioPath,
       );
 
+      final renderStart2 = DateTime.now();
       final updatedDocs = [doc, ...state.userDocuments];
-      _updateAndPersistDocuments(updatedDocs);
+      _updateAndPersistDocuments(updatedDocs, requestUserId);
       state = state.copyWith(
         isExtracting: false,
         activeDocument: doc,
@@ -945,9 +1578,14 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         audioDuration: probedDuration,
         successMessage: 'Audio transcribed successfully!',
       );
+
+      final renderDurationMs = DateTime.now().difference(renderStart2).inMilliseconds;
+      debugPrint('⏱️ [READORA STT TIMINGS BREAKDOWN]');
+      debugPrint('⏱️   Flutter Rendering:  $renderDurationMs ms');
+      debugPrint('⏱️   Transcribed:        ${doc.wordCount} words, ${doc.characterCount} chars');
+
       return doc;
     } catch (e) {
-      if (requestToken != _activeSttToken) return null;
       state = state.copyWith(
         isExtracting: false,
         activeDocument: previousDoc,
@@ -1055,8 +1693,11 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   Future<TtsResponseModel?> generateSpeech({
     required String text,
     required String baseUrl,
+    TtsInputSource? source,
   }) async {
     final cleanText = text.trim();
+    final targetSource = source ?? state.activeTtsTab;
+
     if (cleanText.isEmpty) {
       state = state.copyWith(errorMessage: 'Please enter or extract text first');
       return null;
@@ -1069,21 +1710,24 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       state = state.copyWith(selectedVoiceId: effectiveVoiceId);
     }
 
-    final sessionId = '${DateTime.now().millisecondsSinceEpoch}_${(cleanText.hashCode.abs() % 10000)}';
-    _activeSessionId = sessionId;
+    final currentSeq = (_tabRequestSeq[targetSource] ?? 0) + 1;
+    _tabRequestSeq[targetSource] = currentSeq;
+    final requestId = currentSeq;
+    final sessionId = '${targetSource.name}_${requestId}_${DateTime.now().millisecondsSinceEpoch}_${(cleanText.hashCode.abs() % 10000)}';
+    _tabActiveSessionId[targetSource] = sessionId;
     _lastBaseUrl = baseUrl;
 
     final chunks = splitTextIntoSafeChunks(cleanText, maxChunkSize: 3500);
     final totalChunks = chunks.length;
 
-    // Reset audio player & progressive queue
-    await _audioPlayer.stop();
-    _progressiveAudioQueue = List.filled(totalChunks, null, growable: true);
+    _tabProgressiveAudioQueue[targetSource] = List.filled(totalChunks, null, growable: true);
 
-    state = state.copyWith(
-      isGeneratingSpeech: true,
-      errorMessage: null,
-      successMessage: null,
+    final generatingTab = (targetSource == TtsInputSource.document
+            ? state.documentTabState
+            : state.textTabState)
+        .copyWith(
+      isGenerating: true,
+      playerState: PlayerState.stopped,
       isProgressive: totalChunks > 1,
       progressiveCurrentChunk: 1,
       progressiveTotalChunks: totalChunks,
@@ -1093,6 +1737,21 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       isBufferingNextChunk: false,
     );
 
+    state = state.copyWith(
+      documentTabState: targetSource == TtsInputSource.document ? generatingTab : null,
+      textTabState: targetSource == TtsInputSource.text ? generatingTab : null,
+      errorMessage: null,
+      successMessage: null,
+    );
+
+    // Reset audio player if playing this source
+    if (_playingSource == targetSource || _playingSource == null) {
+      _playingSource = null;
+      try {
+        await _audioPlayer.stop();
+      } catch (_) {}
+    }
+
     if (totalChunks <= 1) {
       // Single chunk: standard fast conversion
       try {
@@ -1100,30 +1759,50 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
           text: cleanText,
           language: state.selectedLanguage,
           voiceId: effectiveVoiceId,
-          documentId: state.activeDocument?.docId,
-          textHash: state.activeDocument?.contentHash,
+          documentId: targetSource == TtsInputSource.document ? state.activeDocument?.docId : null,
+          textHash: targetSource == TtsInputSource.document ? state.activeDocument?.contentHash : null,
         );
 
-        if (_activeSessionId != sessionId) return null;
+        if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) {
+          return null;
+        }
 
-        state = state.copyWith(
-          isGeneratingSpeech: false,
-          currentTtsResponse: response,
-          successMessage: 'Speech generated successfully!',
+        final doneTab = (targetSource == TtsInputSource.document
+                ? state.documentTabState
+                : state.textTabState)
+            .copyWith(
+          isGenerating: false,
+          response: response,
           progressiveCompletedChunks: 1,
           completeAudioUrl: response.audioUrl,
           completeFilename: response.filename,
         );
 
+        state = state.copyWith(
+          documentTabState: targetSource == TtsInputSource.document ? doneTab : null,
+          textTabState: targetSource == TtsInputSource.text ? doneTab : null,
+          successMessage: 'Speech generated successfully!',
+        );
+
         final shouldAutoPlay = _ref?.read(settingsProvider).autoPlayTts ?? false;
-        if (shouldAutoPlay) {
-          await playAudio(response.audioUrl, baseUrl);
+        // ONLY auto-play if user is still on the originating tab!
+        if (shouldAutoPlay && state.activeTtsTab == targetSource) {
+          await playAudio(response.audioUrl, baseUrl, source: targetSource);
         }
         return response;
       } catch (e) {
-        if (_activeSessionId != sessionId) return null;
+        if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) {
+          return null;
+        }
+        final failTab = (targetSource == TtsInputSource.document
+                ? state.documentTabState
+                : state.textTabState)
+            .copyWith(
+          isGenerating: false,
+        );
         state = state.copyWith(
-          isGeneratingSpeech: false,
+          documentTabState: targetSource == TtsInputSource.document ? failTab : null,
+          textTabState: targetSource == TtsInputSource.text ? failTab : null,
           errorMessage: 'Speech generation failed: $e',
         );
         return null;
@@ -1137,29 +1816,37 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         text: chunks[0],
         language: state.selectedLanguage,
         voiceId: effectiveVoiceId,
-        documentId: state.activeDocument?.docId,
-        textHash: state.activeDocument?.contentHash,
+        documentId: targetSource == TtsInputSource.document ? state.activeDocument?.docId : null,
+        textHash: targetSource == TtsInputSource.document ? state.activeDocument?.contentHash : null,
         chunkIndex: 0,
         totalChunks: totalChunks,
         sessionId: sessionId,
       );
 
-      if (_activeSessionId != sessionId) return null;
+      if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) {
+        return null;
+      }
 
-      _progressiveAudioQueue[0] = chunk0Response;
+      _tabProgressiveAudioQueue[targetSource]![0] = chunk0Response;
 
-      // Stop loading spinner immediately — Chunk 0 audio is ready!
-      state = state.copyWith(
-        isGeneratingSpeech: false,
-        currentTtsResponse: chunk0Response,
+      final chunk0DoneTab = (targetSource == TtsInputSource.document
+              ? state.documentTabState
+              : state.textTabState)
+          .copyWith(
+        isGenerating: false,
+        response: chunk0Response,
         progressiveCompletedChunks: 1,
+      );
+
+      state = state.copyWith(
+        documentTabState: targetSource == TtsInputSource.document ? chunk0DoneTab : null,
+        textTabState: targetSource == TtsInputSource.text ? chunk0DoneTab : null,
         successMessage: 'Playing Part 1 of $totalChunks (buffering remaining in background...)',
       );
 
-      // Begin audio playback if autoplay enabled
       final shouldAutoPlay = _ref?.read(settingsProvider).autoPlayTts ?? false;
-      if (shouldAutoPlay) {
-        await playAudio(chunk0Response.audioUrl, baseUrl);
+      if (shouldAutoPlay && state.activeTtsTab == targetSource) {
+        await playAudio(chunk0Response.audioUrl, baseUrl, source: targetSource);
       }
 
       // 2. Buffer subsequent chunks sequentially in the background
@@ -1167,15 +1854,26 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
         chunks: chunks,
         effectiveVoiceId: effectiveVoiceId,
         sessionId: sessionId,
+        requestId: requestId,
+        targetSource: targetSource,
         baseUrl: baseUrl,
       );
 
       return chunk0Response;
     } catch (e) {
-      if (_activeSessionId != sessionId) return null;
-      state = state.copyWith(
-        isGeneratingSpeech: false,
+      if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) {
+        return null;
+      }
+      final failTab = (targetSource == TtsInputSource.document
+              ? state.documentTabState
+              : state.textTabState)
+          .copyWith(
+        isGenerating: false,
         isProgressive: false,
+      );
+      state = state.copyWith(
+        documentTabState: targetSource == TtsInputSource.document ? failTab : null,
+        textTabState: targetSource == TtsInputSource.text ? failTab : null,
         errorMessage: 'Failed to start speech conversion: $e',
       );
       return null;
@@ -1186,45 +1884,64 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     required List<String> chunks,
     required String effectiveVoiceId,
     required String sessionId,
+    required int requestId,
+    required TtsInputSource targetSource,
     required String baseUrl,
   }) async {
     for (int i = 1; i < chunks.length; i++) {
-      if (_activeSessionId != sessionId) break;
+      if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) break;
 
       int retries = 2;
       bool success = false;
-      while (retries > 0 && !success && _activeSessionId == sessionId) {
+      while (retries > 0 && !success && _tabActiveSessionId[targetSource] == sessionId && _tabRequestSeq[targetSource] == requestId) {
         try {
           final chunkResponse = await _repository.generateSpeech(
             text: chunks[i],
             language: state.selectedLanguage,
             voiceId: effectiveVoiceId,
-            documentId: state.activeDocument?.docId,
-            textHash: state.activeDocument?.contentHash,
+            documentId: targetSource == TtsInputSource.document ? state.activeDocument?.docId : null,
+            textHash: targetSource == TtsInputSource.document ? state.activeDocument?.contentHash : null,
             chunkIndex: i,
             totalChunks: chunks.length,
             sessionId: sessionId,
           );
 
-          if (_activeSessionId != sessionId) break;
+          if (_tabActiveSessionId[targetSource] != sessionId || _tabRequestSeq[targetSource] != requestId) break;
 
-          _progressiveAudioQueue[i] = chunkResponse;
+          _tabProgressiveAudioQueue[targetSource]![i] = chunkResponse;
           success = true;
 
-          state = state.copyWith(
+          final curTabState = targetSource == TtsInputSource.document
+              ? state.documentTabState
+              : state.textTabState;
+
+          final updatedTabState = curTabState.copyWith(
             progressiveCompletedChunks: i + 1,
-            completeAudioUrl: chunkResponse.completeAudioUrl ?? state.completeAudioUrl,
-            completeFilename: chunkResponse.completeFilename ?? state.completeFilename,
+            completeAudioUrl: chunkResponse.completeAudioUrl ?? curTabState.completeAudioUrl,
+            completeFilename: chunkResponse.completeFilename ?? curTabState.completeFilename,
+          );
+
+          state = state.copyWith(
+            documentTabState: targetSource == TtsInputSource.document ? updatedTabState : null,
+            textTabState: targetSource == TtsInputSource.text ? updatedTabState : null,
           );
 
           // If playback of previous chunk finished while waiting for this chunk:
-          if (_activeSessionId == sessionId &&
-              state.playerState != PlayerState.stopped &&
-              state.isBufferingNextChunk &&
-              state.progressiveCurrentChunk == i + 1) {
-            state = state.copyWith(isBufferingNextChunk: false, currentTtsResponse: chunkResponse);
-            if (state.playerState != PlayerState.paused && state.playerState != PlayerState.stopped) {
-              await playAudio(chunkResponse.audioUrl, baseUrl);
+          if (_playingSource == targetSource &&
+              _tabActiveSessionId[targetSource] == sessionId &&
+              updatedTabState.playerState != PlayerState.stopped &&
+              updatedTabState.isBufferingNextChunk &&
+              updatedTabState.progressiveCurrentChunk == i + 1) {
+            final nextChunkTab = updatedTabState.copyWith(
+              isBufferingNextChunk: false,
+              response: chunkResponse,
+            );
+            state = state.copyWith(
+              documentTabState: targetSource == TtsInputSource.document ? nextChunkTab : null,
+              textTabState: targetSource == TtsInputSource.text ? nextChunkTab : null,
+            );
+            if (nextChunkTab.playerState != PlayerState.paused && nextChunkTab.playerState != PlayerState.stopped) {
+              await playAudio(chunkResponse.audioUrl, baseUrl, source: targetSource);
             }
           }
         } catch (err) {
@@ -1237,26 +1954,19 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
     }
   }
 
-  void resetTtsResponse() {
-    _invalidateActiveSession();
+  void resetTtsResponse({TtsInputSource? source}) {
+    final targetSource = source ?? state.activeTtsTab;
+    _invalidateActiveSession(targetSource);
+    final resetTab = const TtsTabState();
     state = state.copyWith(
-      clearTtsResponse: true,
-      playerState: PlayerState.stopped,
-      audioPosition: Duration.zero,
-      audioDuration: Duration.zero,
-      isProgressive: false,
-      progressiveCurrentChunk: 1,
-      progressiveTotalChunks: 1,
-      progressiveCompletedChunks: 0,
-      completeAudioUrl: null,
-      completeFilename: null,
-      isBufferingNextChunk: false,
+      documentTabState: targetSource == TtsInputSource.document ? resetTab : null,
+      textTabState: targetSource == TtsInputSource.text ? resetTab : null,
     );
   }
 
   String resolveAudioUrl(String audioPath, String baseUrl) {
     if (audioPath.startsWith('http://') || audioPath.startsWith('https://')) {
-      return audioPath;
+      return _attachTokenIfMissing(audioPath);
     }
     String cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
     String cleanPath = audioPath.startsWith('/') ? audioPath : '/$audioPath';
@@ -1265,12 +1975,23 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
       cleanBase = cleanBase.substring(0, cleanBase.length - 4);
     }
 
-    return '$cleanBase$cleanPath';
+    return _attachTokenIfMissing('$cleanBase$cleanPath');
   }
 
-  Future<void> playAudio(String audioPath, String baseUrl) async {
+  String _attachTokenIfMissing(String url) {
+    final token = _storageService.getToken();
+    if (token != null && token.isNotEmpty && !url.contains('token=')) {
+      final separator = url.contains('?') ? '&' : '?';
+      return '$url${separator}token=$token';
+    }
+    return url;
+  }
+
+  Future<void> playAudio(String audioPath, String baseUrl, {TtsInputSource? source}) async {
     try {
+      final playSource = source ?? state.activeTtsTab;
       _lastBaseUrl = baseUrl;
+      _playingSource = playSource;
       final String fullUrl = resolveAudioUrl(audioPath, baseUrl);
       try {
         _ref?.read(downloadsProvider.notifier).stopPlayback();
@@ -1355,16 +2076,22 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
   Future<void> togglePlayPause(String baseUrl) async {
     if (state.isPlayingOriginalAudio) {
       if (state.currentTtsResponse != null && state.currentTtsResponse!.audioUrl.isNotEmpty) {
-        await playAudio(state.currentTtsResponse!.audioUrl, baseUrl);
+        await playAudio(state.currentTtsResponse!.audioUrl, baseUrl, source: state.activeTtsTab);
       }
       return;
     }
-    if (state.playerState == PlayerState.playing) {
+
+    final activeTab = state.activeTtsTab;
+    final tabState = activeTab == TtsInputSource.document
+        ? state.documentTabState
+        : state.textTabState;
+
+    if (tabState.playerState == PlayerState.playing && _playingSource == activeTab) {
       await _audioPlayer.pause();
-    } else if (state.playerState == PlayerState.paused) {
+    } else if (tabState.playerState == PlayerState.paused && _playingSource == activeTab) {
       await _audioPlayer.resume();
-    } else if (state.currentTtsResponse != null && state.currentTtsResponse!.audioUrl.isNotEmpty) {
-      await playAudio(state.currentTtsResponse!.audioUrl, baseUrl);
+    } else if (tabState.response != null && tabState.response!.audioUrl.isNotEmpty) {
+      await playAudio(tabState.response!.audioUrl, baseUrl, source: activeTab);
     }
   }
 
@@ -1394,6 +2121,15 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
 
   Future<void> seekAudio(Duration duration) async {
     await _audioPlayer.seek(duration);
+    final target = _playingSource ?? state.activeTtsTab;
+    final updatedTab = (target == TtsInputSource.document
+            ? state.documentTabState
+            : state.textTabState)
+        .copyWith(position: duration);
+    state = state.copyWith(
+      documentTabState: target == TtsInputSource.document ? updatedTab : null,
+      textTabState: target == TtsInputSource.text ? updatedTab : null,
+    );
   }
 
   Future<void> setPlaybackRate(double rate) async {
@@ -1446,16 +2182,17 @@ class DocumentTtsNotifier extends StateNotifier<DocumentTtsState> {
           orElse: () => VoiceModel(voiceId: state.selectedVoiceId, name: 'Voice'),
         ).name;
 
+        final isDoc = state.activeTtsTab == TtsInputSource.document;
         final downloadItem = await downloadsNotifier.saveAudioToLibrary(
           audioUrl: targetAudioUrl,
           baseUrl: baseUrl,
           displayFilename: targetFilename,
           language: state.selectedLanguage,
-          sourceDocId: state.activeDocument?.docId,
-          sourceDocName: state.activeDocument?.filename,
+          sourceDocId: isDoc ? state.activeDocument?.docId : null,
+          sourceDocName: isDoc ? state.activeDocument?.filename : 'Typed Text',
           voiceId: state.selectedVoiceId,
           voiceName: voiceName,
-          generationSessionId: _activeSessionId,
+          generationSessionId: _tabActiveSessionId[state.activeTtsTab] ?? '',
           duration: state.audioDuration,
         );
 

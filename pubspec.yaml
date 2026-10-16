@@ -42,6 +42,9 @@ dependencies:
   path_provider: ^2.1.6
   readora_audio_stt:
     path: packages/readora_audio_stt
+  image_picker: ^1.2.4
+  image: ^4.12.0
+  http_parser: ^4.0.2
 
 dependency_overrides:
   flutter_plugin_android_lifecycle: 2.0.20

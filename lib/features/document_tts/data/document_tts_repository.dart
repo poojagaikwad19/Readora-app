@@ -99,4 +99,9 @@ class DocumentTtsRepository {
     final res = await transcribeAudioBackendDetailed(filePath, language: language);
     return res['transcript']?.toString() ?? '';
   }
+
+  /// Delete file from backend by ID
+  Future<void> deleteFile(String id) async {
+    await _apiClient.delete('${ApiEndpoints.getFiles}/$id');
+  }
 }

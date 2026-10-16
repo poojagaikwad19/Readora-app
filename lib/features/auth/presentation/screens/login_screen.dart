@@ -4,9 +4,11 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../common_widgets/app_button.dart';
 import '../../../common_widgets/app_text_field.dart';
 import '../../../document_tts/presentation/screens/dashboard_screen.dart';
+import '../../../document_tts/presentation/providers/document_tts_provider.dart';
 import '../../../downloads/presentation/providers/downloads_provider.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
 import '../providers/auth_provider.dart';
+import 'forgot_password_screen.dart';
 import 'registration_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -34,7 +36,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter both email and password')),
+        const SnackBar(content: Text('Please enter your email address and password')),
+      );
+      return;
+    }
+
+    if (!email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address')),
       );
       return;
     }
@@ -53,6 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (user != null) {
         ref.read(settingsProvider.notifier).reloadSettingsForUser(user.id);
         ref.read(downloadsProvider.notifier).loadDownloads(user.id);
+        await ref.read(documentTtsNotifierProvider.notifier).switchUser(user.id);
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -160,7 +170,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     label: 'Email Address',
                     hintText: 'name@example.com',
                     keyboardType: TextInputType.emailAddress,
-                    prefixIcon: Icons.mail_outline_rounded,
+                    prefixIcon: Icons.alternate_email_rounded,
                   ),
                   const SizedBox(height: 16),
                   AppTextField(
@@ -182,7 +192,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       },
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ForgotPasswordScreen(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        'Forgot password?',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
                   AppButton(
                     label: 'Sign In',
                     icon: Icons.login_rounded,
@@ -190,8 +227,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     onPressed: _handleLogin,
                   ),
                   const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         "Don't have an account? ",

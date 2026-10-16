@@ -134,7 +134,7 @@ class DownloadsNotifier extends StateNotifier<DownloadsState> {
 
   String _resolveAudioUrl(String audioPath, String baseUrl) {
     if (audioPath.startsWith('http://') || audioPath.startsWith('https://')) {
-      return audioPath;
+      return _attachTokenIfMissing(audioPath);
     }
     String cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
     String cleanPath = audioPath.startsWith('/') ? audioPath : '/$audioPath';
@@ -142,7 +142,16 @@ class DownloadsNotifier extends StateNotifier<DownloadsState> {
     if (cleanBase.endsWith('/api') && cleanPath.startsWith('/api/')) {
       cleanBase = cleanBase.substring(0, cleanBase.length - 4);
     }
-    return '$cleanBase$cleanPath';
+    return _attachTokenIfMissing('$cleanBase$cleanPath');
+  }
+
+  String _attachTokenIfMissing(String url) {
+    final token = _storageService.getToken();
+    if (token != null && token.isNotEmpty && !url.contains('token=')) {
+      final separator = url.contains('?') ? '&' : '?';
+      return '$url${separator}token=$token';
+    }
+    return url;
   }
 
   /// Saves complete generated document audio directly to durable in-app private storage
