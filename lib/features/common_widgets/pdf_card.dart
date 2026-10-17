@@ -65,21 +65,29 @@ class PdfCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: context.cardBg,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.borderColor),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFEDE9FE),
+          width: 1.1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.025),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: (isDark ? const Color(0xFF7C3AED) : const Color(0xFF6D28D9)).withValues(alpha: isDark ? 0.25 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -87,13 +95,13 @@ class PdfCard extends StatelessWidget {
               children: [
                 // File Type Icon Box
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 46,
+                  height: 46,
                   decoration: BoxDecoration(
                     color: iconBg,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: iconColor, size: 22),
+                  child: Icon(icon, color: iconColor, size: 23),
                 ),
                 const SizedBox(width: 12),
 
@@ -125,15 +133,15 @@ class PdfCard extends StatelessWidget {
                               decoration: BoxDecoration(
                                 color: isDark
                                     ? const Color(0xFF2E2452)
-                                    : AppColors.primary.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(5),
+                                    : const Color(0xFFEDE9FE),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 document.detectedLanguage.toUpperCase(),
                                 style: TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
+                                  color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF7C3AED),
                                   letterSpacing: 0.3,
                                 ),
                               ),
@@ -169,15 +177,16 @@ class PdfCard extends StatelessWidget {
                     constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                     padding: EdgeInsets.zero,
                     icon: Container(
-                      padding: const EdgeInsets.all(7),
+                      width: 38,
+                      height: 38,
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+                        color: isDark ? const Color(0xFF2E2452) : const Color(0xFFEDE9FE),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.play_arrow_rounded,
-                        color: isDark ? const Color(0xFFC4B5FD) : AppColors.primary,
-                        size: 20,
+                        color: isDark ? const Color(0xFFC4B5FD) : const Color(0xFF7C3AED),
+                        size: 22,
                       ),
                     ),
                     tooltip: 'Play Speech',

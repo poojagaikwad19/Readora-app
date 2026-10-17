@@ -14,6 +14,7 @@ import '../providers/document_tts_provider.dart';
 import '../widgets/readora_audio_player.dart';
 import '../widgets/readora_voice_selector.dart';
 import '../widgets/workspace_overview_carousel.dart';
+import '../widgets/dashboard_background.dart';
 import '../../domain/voice_model.dart';
 import 'history_screen.dart';
 import 'pdf_reader_screen.dart';
@@ -284,99 +285,119 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           });
         }
       },
-      child: Scaffold(
-        backgroundColor: context.scaffoldBg,
-      drawer: _buildSidebarDrawer(user, stats),
-      appBar: AppBar(
-        backgroundColor: context.surfaceBg,
-        elevation: 0,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: Icon(Icons.menu_rounded, color: context.textPrimaryColor),
-            tooltip: 'Navigation Menu',
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-        title: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(9),
-              child: Image.asset(
-                'assets/images/R-logo.png',
-                width: 32,
-                height: 32,
-                fit: BoxFit.cover,
-              ),
+      child: Stack(
+        children: [
+          if (_currentIndex == 0)
+            const Positioned.fill(
+              child: DashboardBackground(),
             ),
-            const SizedBox(width: 10),
-            Text(
-              'Readora',
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 19,
-                color: context.textPrimaryColor,
-                letterSpacing: -0.5,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _currentIndex = 1; // Navigate to Profile tab
-                  });
-                },
-                child: Builder(
-                  builder: (context) {
-                    final initials = _getUserInitials(user?.name);
-                    final avatarUrl = (user != null && user.avatarUrl != null && (user.avatarUrl as String).isNotEmpty)
-                        ? ApiEndpoints.resolveAvatarUrl(user.avatarUrl as String, ref.watch(apiClientProvider).baseUrl)
-                        : null;
-                    return Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: ClipOval(
-                        child: avatarUrl != null
-                            ? Image.network(
-                                avatarUrl,
-                                width: 38,
-                                height: 38,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _buildAppBarInitial(initials, isDark),
-                              )
-                            : _buildAppBarInitial(initials, isDark),
-                      ),
-                    );
-                  },
+          Scaffold(
+            backgroundColor: _currentIndex == 0 ? Colors.transparent : (isDark ? const Color(0xFF0F172A) : const Color(0xFFFAFBFD)),
+            drawer: _buildSidebarDrawer(user, stats),
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              leading: Builder(
+                builder: (context) => IconButton(
+                  icon: Icon(Icons.menu_rounded, color: context.textPrimaryColor),
+                  tooltip: 'Navigation Menu',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
+              title: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Image.asset(
+                      'assets/images/R-logo.png',
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Readora',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 19,
+                      color: context.textPrimaryColor,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: Center(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _currentIndex = 1; // Navigate to Profile tab
+                        });
+                      },
+                      child: Builder(
+                        builder: (context) {
+                          final initials = _getUserInitials(user?.name);
+                          final avatarUrl = (user != null && user.avatarUrl != null && (user.avatarUrl as String).isNotEmpty)
+                              ? ApiEndpoints.resolveAvatarUrl(user.avatarUrl as String, ref.watch(apiClientProvider).baseUrl)
+                              : null;
+                          return Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark ? const Color(0xFF4C3E7A) : Colors.white.withValues(alpha: 0.9),
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            alignment: Alignment.center,
+                            child: ClipOval(
+                              child: avatarUrl != null
+                                  ? Image.network(
+                                      avatarUrl,
+                                      width: 38,
+                                      height: 38,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => _buildAppBarInitial(initials, isDark),
+                                    )
+                                  : _buildAppBarInitial(initials, isDark),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
+            body: IndexedStack(
+              index: _currentIndex,
+              children: [
+                // Tab 0: Home Dashboard Overview
+                _buildHomeTab(user, ttsState, stats),
+
+                // Tab 1: Profile & Settings
+                _buildProfileTab(user, ttsState, stats),
+              ],
+            ),
+            bottomNavigationBar: _buildRaisedBottomNavigationBar(context, isDark),
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          // Tab 0: Home Dashboard Overview
-          _buildHomeTab(user, ttsState, stats),
-
-          // Tab 1: Profile & Settings
-          _buildProfileTab(user, ttsState, stats),
-        ],
-      ),
-      bottomNavigationBar: _buildRaisedBottomNavigationBar(context, isDark),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildRaisedBottomNavigationBar(BuildContext context, bool isDark) {
     final mediaQuery = MediaQuery.of(context);
@@ -495,9 +516,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF5B4DFF)).withOpacity(0.25),
-                        blurRadius: 12,
-                        offset: const Offset(0, 3),
+                        color: (isDark ? const Color(0xFF7C3AED) : const Color(0xFF6D28D9)).withValues(alpha: isDark ? 0.45 : 0.28),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
@@ -536,7 +558,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          padding: const EdgeInsets.symmetric(vertical: 2.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -544,17 +566,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               Icon(
                 isSelected ? activeIcon : icon,
                 color: color,
-                size: 22,
+                size: 21,
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 11,
+                  height: 1.1,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                   color: color,
                 ),
               ),
+              const SizedBox(height: 2),
+              if (isSelected && label == 'Home')
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                )
+              else
+                const SizedBox(height: 4),
             ],
           ),
         ),
@@ -1500,8 +1535,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           subtitle: 'Turn documents or text into speech.',
           actionText: 'Upload File',
           icon: Icons.record_voice_over_rounded,
-          primaryColor: isDark ? const Color(0xFFA78BFA) : AppColors.primary,
-          backgroundColor: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3F0FF),
+          primaryColor: isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED),
+          backgroundColor: isDark ? const Color(0xFF2E2452) : const Color(0xFFF3E8FF),
+          buttonGradient: isDark
+              ? const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFF6D28D9)])
+              : const LinearGradient(colors: [Color(0xFF6D28D9), Color(0xFF7C3AED)]),
           onTap: () {
             Navigator.push(
               context,
@@ -1519,6 +1557,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           icon: Icons.graphic_eq_rounded,
           primaryColor: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488),
           backgroundColor: isDark ? const Color(0xFF133E3B) : const Color(0xFFCCFBF1),
+          buttonGradient: isDark
+              ? const LinearGradient(colors: [Color(0xFF0D9488), Color(0xFF0F766E)])
+              : const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF0D9488)]),
           onTap: () {
             ref.read(documentTtsNotifierProvider.notifier).stopAudioAndClearQueue();
             Navigator.push(
@@ -1563,27 +1604,36 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required Color primaryColor,
     required Color backgroundColor,
     required VoidCallback onTap,
+    Gradient? buttonGradient,
   }) {
     final isDark = context.isDark;
     return Container(
       decoration: BoxDecoration(
         color: context.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: context.borderColor),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFEDE9FE),
+          width: 1.2,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.025),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: (isDark ? const Color(0xFF7C3AED) : const Color(0xFF6D28D9)).withValues(alpha: isDark ? 0.25 : 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(22),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1594,19 +1644,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      width: 44,
-                      height: 44,
+                      width: 46,
+                      height: 46,
                       decoration: BoxDecoration(
                         color: backgroundColor,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Icon(icon, color: primaryColor, size: 22),
+                      child: Icon(icon, color: primaryColor, size: 24),
                     ),
                     const SizedBox(height: 12),
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 14.5,
+                        fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: context.textPrimaryColor,
                         letterSpacing: -0.2,
@@ -1628,10 +1678,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 const SizedBox(height: 14),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 9.5, horizontal: 10),
                   decoration: BoxDecoration(
-                    color: primaryColor,
-                    borderRadius: BorderRadius.circular(10),
+                    color: buttonGradient == null ? primaryColor : null,
+                    gradient: buttonGradient,
+                    borderRadius: BorderRadius.circular(11),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,

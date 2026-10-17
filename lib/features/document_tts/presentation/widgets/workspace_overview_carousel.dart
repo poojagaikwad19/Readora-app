@@ -221,30 +221,35 @@ class _WorkspaceOverviewCarouselState extends State<WorkspaceOverviewCarousel> w
       decoration: BoxDecoration(
         gradient: isDark
             ? const LinearGradient(
-                colors: [Color(0xFF261E47), Color(0xFF163236)],
+                colors: [Color(0xFF261D4E), Color(0xFF1B2844), Color(0xFF143438)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
             : const LinearGradient(
-                colors: [Color(0xFFEDE9FE), Color(0xFFDDF7F2)],
+                colors: [Color(0xFFEDE9FE), Color(0xFFE8F1FC), Color(0xFFDDF7F2)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: isDark ? const Color(0xFF4C3E7A) : const Color(0xFFC4B5FD).withOpacity(0.5),
-          width: 1,
+          color: isDark ? const Color(0xFF4C3E7A).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.85),
+          width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: (isDark ? const Color(0xFF7C3AED) : const Color(0xFF6D28D9)).withValues(alpha: isDark ? 0.25 : 0.07),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.15 : 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
@@ -298,12 +303,20 @@ class _WorkspaceOverviewCarouselState extends State<WorkspaceOverviewCarousel> w
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? const Color(0xFF1E293B).withOpacity(0.85)
-                      : Colors.white.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(14),
+                      ? const Color(0xFF1E293B).withValues(alpha: 0.92)
+                      : Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: isDark ? Colors.white12 : Colors.white.withOpacity(0.6),
+                    color: isDark ? Colors.white12 : Colors.white.withValues(alpha: 0.8),
+                    width: 1,
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: Icon(
                   slideData['icon'],
@@ -331,12 +344,12 @@ class _WorkspaceOverviewCarouselState extends State<WorkspaceOverviewCarousel> w
               onTap: () => _onDotTapped(index),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 250),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: isSelected ? 18.0 : 6.0,
+                margin: const EdgeInsets.symmetric(horizontal: 3.5),
+                width: isSelected ? 20.0 : 6.0,
                 height: 6.0,
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? (isDark ? const Color(0xFFA78BFA) : AppColors.primary)
+                      ? (isDark ? const Color(0xFFA78BFA) : const Color(0xFF6D28D9))
                       : (isDark ? const Color(0xFF334155) : const Color(0xFFDDD6FE)),
                   borderRadius: BorderRadius.circular(3),
                 ),
