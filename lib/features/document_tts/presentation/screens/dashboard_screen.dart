@@ -14,7 +14,6 @@ import '../providers/document_tts_provider.dart';
 import '../widgets/readora_audio_player.dart';
 import '../widgets/readora_voice_selector.dart';
 import '../widgets/workspace_overview_carousel.dart';
-import '../widgets/dashboard_background.dart';
 import '../../domain/voice_model.dart';
 import 'history_screen.dart';
 import 'pdf_reader_screen.dart';
@@ -285,15 +284,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           });
         }
       },
-      child: Stack(
-        children: [
-          if (_currentIndex == 0)
-            const Positioned.fill(
-              child: DashboardBackground(),
-            ),
-          Scaffold(
-            backgroundColor: _currentIndex == 0 ? Colors.transparent : (isDark ? const Color(0xFF0F172A) : const Color(0xFFFAFBFD)),
-            drawer: _buildSidebarDrawer(user, stats),
+      child: Scaffold(
+        backgroundColor: context.scaffoldBg,
+        drawer: _buildSidebarDrawer(user, stats),
             appBar: AppBar(
               backgroundColor: Colors.transparent,
               scrolledUnderElevation: 0,
@@ -393,8 +386,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ],
             ),
             bottomNavigationBar: _buildRaisedBottomNavigationBar(context, isDark),
-          ),
-        ],
       ),
     );
   }
